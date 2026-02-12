@@ -290,7 +290,23 @@ func (cs *CustomerService) GetCustomerStatistics() (*CustomerStatistics, error) 
 
 	customerTypes := make(map[string]int64)
 	for _, result := range typeResults {
-		customerTypes[result["_id"].(string)] = result["count"].(int64)
+		id, ok := result["_id"].(string)
+		if !ok {
+			continue
+		}
+
+		// FIXED: Handle MongoDB numeric types
+		switch v := result["count"].(type) {
+		case int32:
+			customerTypes[id] = int64(v)
+		case int64:
+			customerTypes[id] = v
+		case float64:
+			customerTypes[id] = int64(v)
+		default:
+			customerTypes[id] = 0
+			fmt.Printf("Warning: unexpected type for count: %T\n", v)
+		}
 	}
 
 	// Customers by zone
@@ -316,7 +332,23 @@ func (cs *CustomerService) GetCustomerStatistics() (*CustomerStatistics, error) 
 
 	topZones := make(map[string]int64)
 	for _, result := range zoneResults {
-		topZones[result["_id"].(string)] = result["count"].(int64)
+		id, ok := result["_id"].(string)
+		if !ok {
+			continue
+		}
+
+		// FIXED: Handle MongoDB numeric types
+		switch v := result["count"].(type) {
+		case int32:
+			topZones[id] = int64(v)
+		case int64:
+			topZones[id] = v
+		case float64:
+			topZones[id] = int64(v)
+		default:
+			topZones[id] = 0
+			fmt.Printf("Warning: unexpected type for count in zones: %T\n", v)
+		}
 	}
 
 	return &CustomerStatistics{

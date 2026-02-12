@@ -37,6 +37,8 @@ func NewAuthHandler(userService *services.UserService, jwtService *services.JWTS
 // @Failure 401 {object} Response "Unauthorized"
 // @Failure 500 {object} Response "Internal server error"
 // @Router /auth/login [post]
+// Login handles user authentication
+// Login handles user authentication
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -52,6 +54,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Get user by username
 	user, err := h.userService.GetUserByUsername(req.Username)
 	if err != nil {
+		// Check if it's a "not found" error
+		if err.Error() == "mongo: no documents in result" ||
+			err.Error() == "user not found" {
+			Unauthorized(c, "Invalid credentials")
+			return
+		}
+		InternalServerError(c, "Database error", err)
+		return
+	}
+
+	// IMPORTANT: Check if user is nil
+	if user == nil {
 		Unauthorized(c, "Invalid credentials")
 		return
 	}
@@ -87,13 +101,19 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Return user info (excluding password) and token
 	userResponse := UserResponse{
-		ID:        user.ID.Hex(),
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		Email:     user.Email,
-		Username:  user.Username,
-		Role:      user.Role,
-		Zone:      user.AssignedZone,
+		ID:          user.ID.Hex(),
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		Email:       user.Email,
+		Username:    user.Username,
+		PhoneNumber: user.PhoneNumber,
+		Role:        user.Role,
+		EmployeeID:  user.EmployeeID,
+		Department:  user.Department,
+		Zone:        user.AssignedZone,
+		IsActive:    user.IsActive,
+		LastLogin:   user.LastLogin,
+		CreatedAt:   user.CreatedAt,
 	}
 
 	response := gin.H{
@@ -117,6 +137,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Failure 409 {object} Response "User already exists"
 // @Failure 500 {object} Response "Internal server error"
 // @Router /auth/register [post]
+// Register handles new user registration
 func (h *AuthHandler) Register(c *gin.Context) {
 	// Check if user is admin (from JWT middleware)
 	userRole, exists := c.Get("userRole")
@@ -171,6 +192,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	// Create user model
+	now := time.Now()
 	user := &models.User{
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -182,8 +204,8 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Department:   req.Department,
 		AssignedZone: req.Zone,
 		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}
 
 	// Create user
@@ -198,15 +220,21 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// Return user without password
+	// ✅ FIXED: Return ALL user fields
 	userResponse := UserResponse{
-		ID:        user.ID.Hex(),
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		Email:     user.Email,
-		Username:  user.Username,
-		Role:      user.Role,
-		Zone:      user.AssignedZone,
+		ID:          user.ID.Hex(),
+		FirstName:   user.FirstName,
+		LastName:    user.LastName,
+		Email:       user.Email,
+		Username:    user.Username,
+		PhoneNumber: user.PhoneNumber,
+		Role:        user.Role,
+		EmployeeID:  user.EmployeeID,
+		Department:  user.Department,
+		Zone:        user.AssignedZone,
+		IsActive:    user.IsActive,
+		CreatedAt:   user.CreatedAt,
+		LastLogin:   user.LastLogin,
 	}
 
 	CreatedResponse(c, "User registered successfully", userResponse)

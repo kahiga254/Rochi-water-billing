@@ -8,7 +8,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/crypto/bcrypt"
 
 	"waterbilling/backend/database"
 	"waterbilling/backend/handlers"
@@ -94,24 +97,25 @@ func initializeServices(collections *Collections) *Services {
 	// Customer Service
 	customerService := services.NewCustomerService(collections.Customers, collections.Tariffs)
 
-	// Billing Service
+	// SMS Service - Initialize FIRST so it can be passed to other services
+	smsService, err := services.NewSMSService(database.DB)
+	if err != nil {
+		log.Printf("Warning: SMS service initialization failed: %v", err)
+		log.Println("SMS functionality will be disabled. Set TWILIO credentials in .env to enable.")
+	}
+
+	// Billing Service - NOW WITH SMS SERVICE INCLUDED
 	billingService := services.NewBillingService(
 		collections.Customers,
 		collections.Readings,
 		collections.Bills,
 		collections.Payments,
 		collections.Tariffs,
+		smsService, // ✅ ADDED: SMS service for automatic bill notifications
 	)
 
 	// User Service
 	userService := services.NewUserService(collections.Users)
-
-	// SMS Service
-	smsService, err := services.NewSMSService(database.DB)
-	if err != nil {
-		log.Printf("Warning: SMS service initialization failed: %v", err)
-		log.Println("SMS functionality will be disabled. Set TWILIO credentials in .env to enable.")
-	}
 
 	return &Services{
 		Customer: customerService,
@@ -164,6 +168,10 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 		{
 			public.POST("/login", h.Auth.Login)
 			public.POST("/refresh-token", h.Auth.RefreshToken)
+			public.POST("/register", h.Auth.Register)
+
+			// COMMENT OUT AFTER FIRST USE: public.POST("/setup-admin", setupInitialAdmin)
+			public.POST("/setup-admin", setupInitialAdmin) // Endpoint to create initial admin user
 		}
 
 		// Protected routes (require authentication)
@@ -388,6 +396,109 @@ func getSMSProviderInfo() string {
 		return "Africa's Talking"
 	}
 	return "Not configured"
+}
+
+// Add this function to main.go
+func setupInitialAdmin(c *gin.Context) {
+	var req struct {
+		Username  string `json:"username" binding:"required"`
+		Email     string `json:"email" binding:"required,email"`
+		Password  string `json:"password" binding:"required,min=6"`
+		FirstName string `json:"first_name" binding:"required"`
+		LastName  string `json:"last_name" binding:"required"`
+		Phone     string `json:"phone" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{
+			"success": false,
+			"error":   "invalid_request",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// Get users collection directly
+	collections := initializeCollections()
+
+	// Check if any users exist
+	count, err := collections.Users.CountDocuments(c.Request.Context(), gin.H{})
+	if err != nil {
+		c.JSON(500, gin.H{
+			"success": false,
+			"error":   "database_error",
+			"message": "Failed to check existing users",
+		})
+		return
+	}
+
+	// Only allow this if no users exist (first time setup)
+	if count > 0 {
+		c.JSON(403, gin.H{
+			"success": false,
+			"error":   "setup_complete",
+			"message": "System already has users. Please contact an administrator.",
+		})
+		return
+	}
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"success": false,
+			"error":   "password_hash_failed",
+			"message": "Failed to hash password",
+		})
+		return
+	}
+
+	// Create user document matching your User struct
+	now := time.Now()
+	user := bson.M{
+		"_id":           primitive.NewObjectID(),
+		"first_name":    req.FirstName,
+		"last_name":     req.LastName,
+		"email":         req.Email,
+		"phone_number":  req.Phone,
+		"username":      req.Username,
+		"password":      string(hashedPassword),
+		"role":          "admin",
+		"department":    "Administration",
+		"employee_id":   "ADMIN001",
+		"assigned_zone": nil,
+		"permissions":   []string{"*"}, // Full access
+		"is_active":     true,
+		"last_login":    nil,
+		"created_at":    now,
+		"updated_at":    now,
+	}
+
+	// Insert directly into MongoDB
+	result, err := collections.Users.InsertOne(c.Request.Context(), user)
+	if err != nil {
+		c.JSON(500, gin.H{
+			"success": false,
+			"error":   "creation_failed",
+			"message": "Failed to create user: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(201, gin.H{
+		"success": true,
+		"message": "Initial admin user created successfully",
+		"data": gin.H{
+			"id":           result.InsertedID.(primitive.ObjectID).Hex(),
+			"username":     req.Username,
+			"email":        req.Email,
+			"first_name":   req.FirstName,
+			"last_name":    req.LastName,
+			"phone_number": req.Phone,
+			"role":         "admin",
+			"is_active":    true,
+		},
+	})
 }
 
 var startTime = time.Now()

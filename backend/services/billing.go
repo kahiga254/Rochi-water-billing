@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"waterbilling/backend/models"
@@ -21,15 +22,18 @@ type BillingService struct {
 	billsCollection     *mongo.Collection
 	paymentsCollection  *mongo.Collection
 	tariffsCollection   *mongo.Collection
+	smsService          *SMSService // ADDED: SMS service for notifications
 }
 
-func NewBillingService(customers, readings, bills, payments, tariffs *mongo.Collection) *BillingService {
+// UPDATED: Added smsService parameter
+func NewBillingService(customers, readings, bills, payments, tariffs *mongo.Collection, smsService *SMSService) *BillingService {
 	return &BillingService{
 		customersCollection: customers,
 		readingsCollection:  readings,
 		billsCollection:     bills,
 		paymentsCollection:  payments,
 		tariffsCollection:   tariffs,
+		smsService:          smsService, // ADDED: Store SMS service
 	}
 }
 
@@ -73,29 +77,7 @@ func (bs *BillingService) GetCustomerPreviousReading(meterNumber string) (*model
 	return &reading, nil
 }
 
-// GetCustomerTariff retrieves the tariff for a customer
-func (bs *BillingService) GetCustomerTariff(tariffCode string) (*models.Tariff, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	var tariff models.Tariff
-	err := bs.tariffsCollection.FindOne(
-		ctx,
-		bson.M{"code": tariffCode, "is_active": true},
-		options.FindOne().SetSort(bson.M{"effective_date": -1}),
-	).Decode(&tariff)
-
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			return nil, fmt.Errorf("active tariff with code %s not found", tariffCode)
-		}
-		return nil, fmt.Errorf("error fetching tariff: %v", err)
-	}
-
-	return &tariff, nil
-}
-
-// SubmitMeterReading processes a new meter reading
+// SubmitMeterReading processes a new meter reading with FLAT RATE pricing
 func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading) (*models.Bill, error) {
 	// Start session for transaction
 	session, err := bs.readingsCollection.Database().Client().StartSession()
@@ -105,6 +87,8 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 	defer session.EndSession(context.Background())
 
 	var resultBill *models.Bill
+	var customer *models.Customer // Moved outside for SMS access
+
 	err = mongo.WithSession(context.Background(), session, func(sc mongo.SessionContext) error {
 		// Start transaction
 		if err = session.StartTransaction(); err != nil {
@@ -112,20 +96,13 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 		}
 
 		// 1. Get customer details
-		customer, err := bs.GetCustomerByMeterNumber(readingRequest.MeterNumber)
+		customer, err = bs.GetCustomerByMeterNumber(readingRequest.MeterNumber)
 		if err != nil {
 			session.AbortTransaction(sc)
 			return err
 		}
 
-		// 2. Get tariff information
-		tariff, err := bs.GetCustomerTariff(customer.TariffCode)
-		if err != nil {
-			session.AbortTransaction(sc)
-			return err
-		}
-
-		// 3. Get previous reading
+		// 2. Get previous reading
 		previousReading, err := bs.GetCustomerPreviousReading(readingRequest.MeterNumber)
 
 		// Set previous reading value
@@ -137,7 +114,7 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 			previousReadingValue = customer.InitialReading
 		}
 
-		// 4. Validate and calculate consumption
+		// 3. Validate and calculate consumption
 		if readingRequest.CurrentReading < previousReadingValue {
 			session.AbortTransaction(sc)
 			return fmt.Errorf("current reading (%.2f) cannot be less than previous reading (%.2f)",
@@ -146,15 +123,18 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 
 		consumption := readingRequest.CurrentReading - previousReadingValue
 
-		// 5. Calculate charges
-		waterCharge := consumption * tariff.BaseRate
+		// 4. Calculate charges using SIMPLE FLAT RATE (KSh 100 per unit)
+		ratePerUnit := 100.0 // KSh 100 per unit
+		waterCharge := consumption * ratePerUnit
+		fixedCharge := 0.0 // No fixed charges
+		arrears := 0.0     // Start with zero arrears
 
-		// Apply tiered pricing if available
-		if len(tariff.Tiers) > 0 {
-			waterCharge = bs.calculateTieredCharge(consumption, tariff.Tiers)
+		// If customer has negative balance, add to arrears
+		if customer.Balance < 0 {
+			arrears = -customer.Balance
 		}
 
-		// 6. Prepare meter reading record
+		// 5. Prepare meter reading record
 		reading := &models.MeterReading{
 			ID:              primitive.NewObjectID(),
 			MeterNumber:     readingRequest.MeterNumber,
@@ -165,9 +145,9 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 			PreviousReading: previousReadingValue,
 			CurrentReading:  readingRequest.CurrentReading,
 			Consumption:     consumption,
-			RatePerUnit:     tariff.BaseRate,
+			RatePerUnit:     ratePerUnit,
 			WaterCharge:     waterCharge,
-			FixedCharge:     tariff.FixedCharge,
+			FixedCharge:     fixedCharge,
 			ReadingType:     readingRequest.ReadingType,
 			ReadingMethod:   readingRequest.ReadingMethod,
 			ReaderID:        readingRequest.ReaderID,
@@ -179,22 +159,22 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 			CreatedAt:       time.Now(),
 		}
 
-		// 7. Insert meter reading
+		// 6. Insert meter reading
 		_, err = bs.readingsCollection.InsertOne(sc, reading)
 		if err != nil {
 			session.AbortTransaction(sc)
 			return fmt.Errorf("failed to save meter reading: %v", err)
 		}
 
-		// 8. Generate bill
-		bill, err := bs.generateBill(sc, customer, tariff, reading)
+		// 7. Generate bill
+		bill, err := bs.generateBill(sc, customer, reading, arrears)
 		if err != nil {
 			session.AbortTransaction(sc)
 			return err
 		}
 
-		// 9. Update customer with latest reading
-		err = bs.updateCustomerLastReading(sc, customer.ID, reading.CurrentReading, reading.ReadingDate)
+		// 8. Update customer with latest reading and new balance
+		err = bs.updateCustomerAfterBilling(sc, customer.ID, reading.CurrentReading, reading.ReadingDate, bill.TotalAmount)
 		if err != nil {
 			session.AbortTransaction(sc)
 			return err
@@ -214,51 +194,102 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 		return nil, err
 	}
 
+	// ============ NEW: SMS NOTIFICATION ============
+	// Send SMS notification to customer (non-blocking)
+	if resultBill != nil && customer != nil && customer.PhoneNumber != "" {
+		// Send SMS in a goroutine so it doesn't block the response
+		go bs.sendBillSMSNotification(resultBill, customer)
+	} else {
+		if customer == nil {
+			log.Println("⚠️ Cannot send SMS: customer is nil")
+		} else if customer.PhoneNumber == "" {
+			log.Printf("⚠️ Cannot send SMS: customer %s has no phone number", customer.MeterNumber)
+		}
+	}
+
 	return resultBill, nil
 }
 
-// calculateTieredCharge calculates water charge based on tiered pricing
-func (bs *BillingService) calculateTieredCharge(consumption float64, tiers []models.TariffTier) float64 {
-	var totalCharge float64
-	remainingConsumption := consumption
+// NEW: Send bill SMS notification
+func (bs *BillingService) sendBillSMSNotification(bill *models.Bill, customer *models.Customer) {
+	// Small delay to ensure bill is fully saved
+	time.Sleep(200 * time.Millisecond)
 
-	for _, tier := range tiers {
-		if remainingConsumption <= 0 {
-			break
-		}
-
-		tierRange := tier.MaxConsumption - tier.MinConsumption
-		if tierRange <= 0 {
-			continue
-		}
-
-		if remainingConsumption <= tierRange {
-			totalCharge += remainingConsumption * tier.Rate
-			break
-		} else {
-			totalCharge += tierRange * tier.Rate
-			remainingConsumption -= tierRange
-		}
+	// Format billing period
+	month := bill.BillingPeriod
+	if month == "" {
+		month = time.Now().Format("January 2006")
 	}
 
-	return totalCharge
+	// Format due date
+	dueDate := bill.DueDate.Format("02 Jan 2006")
+
+	// Format the SMS message exactly as you requested
+	message := fmt.Sprintf(`Dear %s,
+
+Your %s water bill is KSh %.0f
+
+Previous reading: %.1f units
+Current reading: %.1f units
+Consumption: %.1f units × KSh 100 = KSh %.0f
+
+Please make your payment of KSh %.0f by %s for smooth running of our services.
+
+Thank you,
+Water Billing System`,
+		customer.FullName(),
+		month,
+		bill.TotalAmount,
+		bill.PreviousReading,
+		bill.CurrentReading,
+		bill.Consumption,
+		bill.WaterCharge,
+		bill.TotalAmount,
+		dueDate)
+
+	// Send the SMS
+	log.Printf("📱 Sending SMS to %s (%s)", customer.FullName(), customer.PhoneNumber)
+	err := bs.smsService.SendSMS(customer.PhoneNumber, message)
+
+	if err != nil {
+		log.Printf("❌ Failed to send SMS to %s: %v", customer.PhoneNumber, err)
+	} else {
+		log.Printf("✅ SMS sent successfully to %s (%s) for bill %s",
+			customer.FullName(), customer.PhoneNumber, bill.BillNumber)
+
+		// Update bill to mark SMS as sent
+		bs.markSMSAsSent(bill.ID)
+	}
 }
 
-// generateBill creates a bill from a meter reading
-func (bs *BillingService) generateBill(sc mongo.SessionContext, customer *models.Customer,
-	tariff *models.Tariff, reading *models.MeterReading) (*models.Bill, error) {
+// NEW: Mark SMS as sent in the bill record
+func (bs *BillingService) markSMSAsSent(billID primitive.ObjectID) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// Calculate arrears (previous balance)
-	arrears := customer.Balance
-	if arrears < 0 {
-		arrears = -arrears // Convert negative balance to positive arrears
-	} else {
-		arrears = 0
+	update := bson.M{
+		"$set": bson.M{
+			"sms_sent":    true,
+			"sms_sent_at": time.Now(),
+		},
 	}
 
-	// Calculate total amount
-	totalAmount := reading.WaterCharge + reading.FixedCharge + arrears
+	_, err := bs.billsCollection.UpdateByID(ctx, billID, update)
+	if err != nil {
+		log.Printf("⚠️ Failed to update SMS sent status for bill %s: %v", billID.Hex(), err)
+	}
+}
+
+// generateBill creates a bill from a meter reading using FLAT RATE pricing
+func (bs *BillingService) generateBill(sc mongo.SessionContext, customer *models.Customer,
+	reading *models.MeterReading, arrears float64) (*models.Bill, error) {
+
+	// Calculate total amount: water charge + arrears (no fixed charges)
+	totalAmount := reading.WaterCharge + arrears
 	totalAmount = utils.RoundToTwoDecimal(totalAmount)
+
+	// Generate bill number
+	billNumber := "BILL-" + reading.MeterNumber + "-" + reading.ReadingDate.Format("200601")
 
 	// Generate bill
 	bill := &models.Bill{
@@ -268,7 +299,7 @@ func (bs *BillingService) generateBill(sc mongo.SessionContext, customer *models
 		ReadingID:       reading.ID,
 		AccountNumber:   customer.AccountNumber,
 		CustomerName:    customer.FullName(),
-		BillNumber:      utils.GenerateBillNumber(),
+		BillNumber:      billNumber,
 		BillDate:        time.Now(),
 		DueDate:         time.Now().AddDate(0, 1, 0), // Due in 1 month
 		BillingPeriod:   reading.BillingPeriod,
@@ -277,7 +308,7 @@ func (bs *BillingService) generateBill(sc mongo.SessionContext, customer *models
 		Consumption:     reading.Consumption,
 		RatePerUnit:     reading.RatePerUnit,
 		WaterCharge:     reading.WaterCharge,
-		FixedCharge:     reading.FixedCharge,
+		FixedCharge:     0.0, // No fixed charges
 		Arrears:         arrears,
 		TotalAmount:     totalAmount,
 		Balance:         totalAmount, // Initially balance equals total amount
@@ -295,21 +326,42 @@ func (bs *BillingService) generateBill(sc mongo.SessionContext, customer *models
 	return bill, nil
 }
 
-// updateCustomerLastReading updates customer's last reading information
-func (bs *BillingService) updateCustomerLastReading(sc mongo.SessionContext,
-	customerID primitive.ObjectID, currentReading float64, readingDate time.Time) error {
+// updateCustomerAfterBilling updates customer's last reading and adds the new bill amount to balance
+func (bs *BillingService) updateCustomerAfterBilling(sc mongo.SessionContext,
+	customerID primitive.ObjectID, currentReading float64, readingDate time.Time, billAmount float64) error {
+
+	// Get current customer to get current balance
+	var customer models.Customer
+	err := bs.customersCollection.FindOne(sc, bson.M{"_id": customerID}).Decode(&customer)
+	if err != nil {
+		return fmt.Errorf("customer not found: %v", err)
+	}
+
+	// New balance = current balance - bill amount (since positive balance is credit)
+	newBalance := customer.Balance - billAmount
+	newBalance = utils.RoundToTwoDecimal(newBalance)
+
+	// Calculate total consumed
+	totalConsumed := customer.TotalConsumed
+	if customer.LastReading > 0 {
+		totalConsumed += (currentReading - customer.LastReading)
+	} else {
+		totalConsumed += currentReading
+	}
 
 	update := bson.M{
 		"$set": bson.M{
 			"last_reading":      currentReading,
 			"last_reading_date": readingDate,
+			"balance":           newBalance,
 			"updated_at":        time.Now(),
+			"total_consumed":    totalConsumed,
 		},
 	}
 
-	_, err := bs.customersCollection.UpdateByID(sc, customerID, update)
+	_, err = bs.customersCollection.UpdateByID(sc, customerID, update)
 	if err != nil {
-		return fmt.Errorf("failed to update customer reading: %v", err)
+		return fmt.Errorf("failed to update customer: %v", err)
 	}
 
 	return nil
@@ -369,7 +421,7 @@ func (bs *BillingService) ProcessPayment(payment *models.Payment) error {
 			return fmt.Errorf("failed to update bill: %v", err)
 		}
 
-		// 5. Update customer balance
+		// 5. Update customer balance (add payment to balance)
 		err = bs.updateCustomerBalance(sc, bill.CustomerID, payment.Amount)
 		if err != nil {
 			session.AbortTransaction(sc)
@@ -397,7 +449,7 @@ func (bs *BillingService) updateCustomerBalance(sc mongo.SessionContext,
 		return fmt.Errorf("customer not found: %v", err)
 	}
 
-	// Update balance (subtract payment from negative balance)
+	// Update balance (add payment to balance - since positive balance = credit)
 	newBalance := customer.Balance + paymentAmount
 	newBalance = utils.RoundToTwoDecimal(newBalance)
 
@@ -405,7 +457,9 @@ func (bs *BillingService) updateCustomerBalance(sc mongo.SessionContext,
 		"$set": bson.M{
 			"balance":    newBalance,
 			"updated_at": time.Now(),
-			"total_paid": customer.TotalPaid + paymentAmount,
+		},
+		"$inc": bson.M{
+			"total_paid": paymentAmount,
 		},
 	}
 
@@ -561,10 +615,25 @@ func (bs *BillingService) GetBillingSummary(startDate, endDate time.Time) (*Bill
 
 	for _, result := range results {
 		status := result["_id"].(string)
+
+		// Handle MongoDB numeric types safely
+		var count int32
+		switch v := result["count"].(type) {
+		case int32:
+			count = v
+		case int64:
+			count = int32(v)
+		case float64:
+			count = int32(v)
+		}
+
+		totalAmount, _ := result["totalAmount"].(float64)
+		totalPaid, _ := result["totalPaid"].(float64)
+
 		summary.StatusBreakdown[status] = StatusSummary{
-			Count:       result["count"].(int32),
-			TotalAmount: result["totalAmount"].(float64),
-			TotalPaid:   result["totalPaid"].(float64),
+			Count:       count,
+			TotalAmount: totalAmount,
+			TotalPaid:   totalPaid,
 		}
 	}
 
