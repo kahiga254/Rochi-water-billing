@@ -1,64 +1,51 @@
 import apiClient from './client';
-import { Customer, Bill, MeterReading } from '@/types';
 
 export const customerApi = {
+  // Get all customers with pagination - ADD THIS METHOD
+  getAll: async (page = 1, limit = 100) => {
+    const response = await apiClient.get(`/customers?page=${page}&limit=${limit}`);
+    return response.data;
+  },
+
   // Get customer by meter number
-  getCustomer: async (meterNumber: string) => {
+  getCustomerByMeter: async (meterNumber: string) => {
     const response = await apiClient.get(`/customers/meter/${meterNumber}`);
     return response.data;
   },
 
-  // Get customer by ID (from auth)
-  getCustomerById: async (id: string) => {
-    const response = await apiClient.get(`/customers/${id}`);
-    return response.data;
-  },
-
   // Get customer bills
-  getBills: async (meterNumber: string, status?: string, limit: number = 12) => {
-    const params = new URLSearchParams();
-    if (status) params.append('status', status);
-    if (limit) params.append('limit', limit.toString());
-    
-    const response = await apiClient.get(
-      `/billing/customers/${meterNumber}/bills?${params.toString()}`
-    );
+  getBills: async (meterNumber: string) => {
+    const response = await apiClient.get(`/billing/customers/${meterNumber}/bills?limit=12`);
     return response.data;
   },
 
-  // Get current bill/unpaid bills
+  // Get reading history for charts
+  getReadingHistory: async (meterNumber: string) => {
+    const response = await apiClient.get(`/billing/customers/${meterNumber}/readings?limit=24`);
+    return response.data;
+  },
+
+  // Get current bill (pending)
   getCurrentBill: async (meterNumber: string) => {
-    const response = await apiClient.get(
-      `/billing/customers/${meterNumber}/bills?status=pending&limit=1`
-    );
+    const response = await apiClient.get(`/billing/customers/${meterNumber}/bills?status=pending&limit=1`);
     return response.data;
   },
 
-  // Get meter reading history
-  getReadingHistory: async (meterNumber: string, limit: number = 24) => {
-    const response = await apiClient.get(
-      `/billing/customers/${meterNumber}/readings?limit=${limit}`
-    );
+  // Make payment (simulate M-Pesa)
+  makePayment: async (billId: string, amount: number, phoneNumber: string) => {
+    const response = await apiClient.post(`/billing/bills/${billId}/pay`, {
+      amount,
+      payment_method: 'mpesa',
+      transaction_id: `MPESA${Date.now()}`,
+      payer_phone: phoneNumber,
+      notes: 'Payment via customer portal'
+    });
     return response.data;
   },
 
   // Get payment history
-  getPaymentHistory: async (meterNumber: string, limit: number = 12) => {
-    const response = await apiClient.get(`/payments?meter_number=${meterNumber}&limit=${limit}`);
+  getPaymentHistory: async (meterNumber: string) => {
+    const response = await apiClient.get(`/payments?meter_number=${meterNumber}&limit=10`);
     return response.data;
-  },
-
-  // Get consumption statistics
-  getConsumptionStats: async (meterNumber: string, months: number = 12) => {
-    const response = await apiClient.get(
-      `/customers/meter/${meterNumber}/consumption?months=${months}`
-    );
-    return response.data;
-  },
-
-  // Update customer profile
-  updateProfile: async (customerId: string, data: Partial<Customer>) => {
-    const response = await apiClient.put(`/customers/${customerId}`, data);
-    return response.data;
-  },
+  }
 };

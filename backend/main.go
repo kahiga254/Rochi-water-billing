@@ -181,6 +181,8 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 			// Customer routes
 			customers := protected.Group("/customers")
 			{
+
+				customers.GET("", middleware.RoleMiddleware("admin", "manager"), h.Customer.GetCustomers)
 				customers.POST("", middleware.RoleMiddleware("admin", "manager"), h.Customer.CreateCustomer)
 				customers.GET("/meter/:meterNumber", h.Customer.GetCustomerByMeterNumber)
 				customers.GET("/search", h.Customer.SearchCustomers)

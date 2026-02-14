@@ -1,110 +1,85 @@
-
-"use client";
 import { useRouter } from 'next/navigation';
-import { useCallback } from 'react';
 import { useAuthStore } from '@/lib/store/authStore';
+import { authApi } from '@/lib/api/auth';
+import { LoginCredentials } from '@/types';
 import { toast } from 'sonner';
-
-interface ApiResult {
-  success: boolean;
-  error?: string;
-}
 
 export const useAuth = () => {
   const router = useRouter();
-  const { 
-    user, 
-    token, 
-    isAuthenticated, 
-    isLoading, 
-    error,
-    setUser, 
-    setToken, 
-    setLoading, 
-    setError,
-    logout: storeLogout 
-  } = useAuthStore();
+  const { user, token, isAuthenticated, isLoading, setUser, setToken, setLoading, logout } = useAuthStore();
 
-  // ✅ SIMPLIFIED LOGIN - Matches your working test exactly
-  const login = async (username: string, password: string): Promise<ApiResult> => {
+  const login = async (credentials: LoginCredentials) => {
     try {
       setLoading(true);
-      setError(null);
+      const response = await authApi.login(credentials);
       
-      // Use direct fetch - this is what works!
-      const response = await fetch('http://localhost:8080/api/v1/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username,
-          password
-        })
-      });
-      
-      const result = await response.json();
-      console.log('📥 Login response:', result);
-      
-      if (result.success && result.data) {
-        const { token, user } = result.data;
-        
+      if (response.success) {
+        const { token, user } = response.data;
         setToken(token);
         setUser(user);
         
-        toast.success(`Welcome back, ${user.first_name || user.username}!`);
+        toast.success(`Welcome back, ${user.first_name}!`);
         
-        // Redirect based on role
-        if (user.role === 'admin') {
-          router.push('/dashboard');
-        } else if (user.role === 'customer') {
-          router.push('/customer');
-        } else if (user.role === 'reader') {
-          router.push('/reader/dashboard');
-        } else {
-          router.push('/dashboard');
+        // Redirect based on role - MATCHING YOUR CURRENT FOLDER STRUCTURE
+        switch (user.role) {
+          case 'admin':
+            router.push('/admin');
+            break;
+          case 'customer':
+            router.push('/my-account');
+            break;
+          case 'reader':
+            router.push('/reader/dashboard');
+            break;
+          default:
+            router.push('/dashboard');
         }
         
         return { success: true };
       }
       
-      throw new Error(result.message || 'Login failed');
-      
+      return { success: false, error: response.message };
     } catch (error: any) {
-      console.error('❌ Login error:', error);
-      const errorMessage = error.message || 'Invalid username or password';
-      setError(errorMessage);
-      toast.error(errorMessage);
-      return { success: false, error: errorMessage };
+      const message = error.response?.data?.message || 'Login failed';
+      toast.error(message);
+      return { success: false, error: message };
     } finally {
       setLoading(false);
     }
   };
 
-  const logout = useCallback(async () => {
+  const handleLogout = async () => {
     try {
-      await fetch('http://localhost:8080/api/v1/auth/logout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      await authApi.logout();
+      toast.info('Logged out successfully');
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      storeLogout();
+      logout();
       router.push('/login');
-      toast.info('Logged out successfully');
     }
-  }, [router, storeLogout]);
+  };
+
+  const checkAuth = async () => {
+    if (!token) return;
+    
+    try {
+      const response = await authApi.getProfile();
+      if (response.success) {
+        setUser(response.data);
+      }
+    } catch (error) {
+      logout();
+    }
+  };
 
   return {
     user,
     token,
     isAuthenticated,
     isLoading,
-    error,
     login,
-    logout,
+    logout: handleLogout,
+    checkAuth,
   };
 };

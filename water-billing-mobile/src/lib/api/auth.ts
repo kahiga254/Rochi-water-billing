@@ -1,60 +1,33 @@
 import apiClient from './client';
-import { 
-  LoginResponse, 
-  User, 
-  ChangePasswordRequest,
-  UpdateProfileRequest,
-  RegisterRequest 
-} from '@/types';
-import { ApiResponse } from '@/types';
+import { LoginCredentials, LoginResponse, User } from '@/types';
 
 export const authApi = {
-  // Login
-  login: async (username: string, password: string): Promise<LoginResponse> => {
-    console.log('🔵 [authApi] Login attempt for:', username);
-    console.log('🔵 [authApi] Request payload:', { username, password: '***' });
-    
-    try {
-      const response = await apiClient.post<LoginResponse>('/auth/login', {
-        username,
-        password,
-      });
-      
-      console.log('🟢 [authApi] Login response status:', response.status);
-      console.log('🟢 [authApi] Login response data:', response.data);
-      
-      return response.data;
-    } catch (error) {
-      console.error('🔴 [authApi] Login error:', error);
-      throw error;
-    }
-  },
-
-  // Get current user profile
-  getProfile: async (): Promise<ApiResponse<User>> => {
-    console.log('🔵 [authApi] Fetching profile');
-    const response = await apiClient.get<ApiResponse<User>>('/profile');
+  login: async (credentials: LoginCredentials): Promise<LoginResponse> => {
+    const response = await apiClient.post('/auth/login', credentials);
     return response.data;
   },
 
-  // Update profile
-  updateProfile: async (data: UpdateProfileRequest): Promise<ApiResponse> => {
-    console.log('🔵 [authApi] Updating profile:', data);
-    const response = await apiClient.put<ApiResponse>('/profile', data);
+  logout: async (): Promise<{ success: boolean }> => {
+    const response = await apiClient.post('/auth/logout');
     return response.data;
   },
 
-  // Change password
-  changePassword: async (data: ChangePasswordRequest): Promise<ApiResponse> => {
-    console.log('🔵 [authApi] Changing password');
-    const response = await apiClient.post<ApiResponse>('/profile/change-password', data);
+  getProfile: async (): Promise<{ success: boolean; data: User }> => {
+    const response = await apiClient.get('/profile');
     return response.data;
   },
 
-  // Logout
-  logout: async (): Promise<ApiResponse> => {
-    console.log('🔵 [authApi] Logging out');
-    const response = await apiClient.post<ApiResponse>('/auth/logout');
+  updateProfile: async (data: Partial<User>): Promise<{ success: boolean }> => {
+    const response = await apiClient.put('/profile', data);
+    return response.data;
+  },
+
+  changePassword: async (currentPassword: string, newPassword: string): Promise<{ success: boolean }> => {
+    const response = await apiClient.post('/profile/change-password', {
+      current_password: currentPassword,
+      new_password: newPassword,
+      confirm_password: newPassword
+    });
     return response.data;
   },
 };

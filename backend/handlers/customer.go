@@ -3,11 +3,13 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv" // ✅ ADD THIS - missing import
 
 	"waterbilling/backend/models"
 	"waterbilling/backend/services"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson" // ✅ ADD THIS - missing import
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -376,6 +378,67 @@ func (h *CustomerHandler) BulkCreateCustomers(c *gin.Context) {
 	}
 
 	CreatedResponse(c, "Bulk create completed", response)
+}
+
+// ✅ GetCustomers retrieves all customers with pagination - FIXED with proper imports
+// @Summary Get all customers
+// @Description Get all customers with pagination and filtering
+// @Tags Customers
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(20)
+// @Param search query string false "Search term"
+// @Param zone query string false "Filter by zone"
+// @Param status query string false "Filter by status"
+// @Success 200 {object} Response "Customers retrieved successfully"
+// @Failure 500 {object} Response "Internal server error"
+// @Router /customers [get]
+func (h *CustomerHandler) GetCustomers(c *gin.Context) {
+	// Parse query parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	search := c.Query("search")
+	zone := c.Query("zone")
+	status := c.Query("status")
+
+	// Build filter
+	filter := bson.M{}
+	if search != "" {
+		filter["$or"] = []bson.M{
+			{"meter_number": bson.M{"$regex": search, "$options": "i"}},
+			{"first_name": bson.M{"$regex": search, "$options": "i"}},
+			{"last_name": bson.M{"$regex": search, "$options": "i"}},
+			{"email": bson.M{"$regex": search, "$options": "i"}},
+		}
+	}
+	if zone != "" {
+		filter["zone"] = zone
+	}
+	if status != "" {
+		filter["status"] = status
+	}
+
+	// Get customers from service
+	customers, total, err := h.customerService.GetCustomers(c.Request.Context(), filter, page, limit)
+	if err != nil {
+		InternalServerError(c, "Failed to fetch customers", err)
+		return
+	}
+
+	// Calculate total pages
+	totalPages := int64(0)
+	if limit > 0 {
+		totalPages = (total + int64(limit) - 1) / int64(limit)
+	}
+
+	SuccessResponse(c, "Customers retrieved successfully", gin.H{
+		"customers":   customers,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"total_pages": totalPages,
+	})
 }
 
 // UpdateStatusRequest represents status update request

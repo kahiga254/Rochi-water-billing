@@ -1,9 +1,8 @@
-'use client';
+"use client";
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { Loading } from '@/components/common/Loading';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -19,14 +18,20 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
       if (!isAuthenticated) {
         router.push('/login');
       } else if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-        // User doesn't have required role
         router.push('/unauthorized');
       }
     }
   }, [isAuthenticated, isLoading, user, router, allowedRoles]);
 
   if (isLoading) {
-    return <Loading fullScreen />;
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    );
   }
 
   if (!isAuthenticated) {

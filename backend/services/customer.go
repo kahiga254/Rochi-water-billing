@@ -361,6 +361,50 @@ func (cs *CustomerService) GetCustomerStatistics() (*CustomerStatistics, error) 
 	}, nil
 }
 
+// GetCustomers retrieves all customers with pagination
+func (cs *CustomerService) GetCustomers(ctx context.Context, filter bson.M, page, limit int) ([]models.Customer, int64, error) {
+	// Validate pagination parameters
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	// Calculate skip for pagination
+	skip := (page - 1) * limit
+
+	// Set options with pagination and sorting
+	opts := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"created_at": -1})
+
+	// Execute query - FIXED: Use customersCollection instead of collection
+	cursor, err := cs.customersCollection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error fetching customers: %v", err)
+	}
+	defer cursor.Close(ctx)
+
+	// Decode results
+	var customers []models.Customer
+	if err = cursor.All(ctx, &customers); err != nil {
+		return nil, 0, fmt.Errorf("error decoding customers: %v", err)
+	}
+
+	// Get total count for pagination - FIXED: Use customersCollection instead of collection
+	total, err := cs.customersCollection.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error counting customers: %v", err)
+	}
+
+	return customers, total, nil
+}
+
 // CustomerStatistics represents customer statistics
 type CustomerStatistics struct {
 	Total         int64            `json:"total"`
