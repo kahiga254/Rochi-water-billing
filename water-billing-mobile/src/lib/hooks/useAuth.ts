@@ -12,11 +12,17 @@ export const useAuth = () => {
     try {
       setLoading(true);
       const response = await authApi.login(credentials);
+
+      
       
       if (response.success) {
         const { token, user } = response.data;
+
+      localStorage.setItem('token', token);
+      localStorage.setItem('user', JSON.stringify(user));
         setToken(token);
         setUser(user);
+        
         
         toast.success(`Welcome back, ${user.first_name}!`);
         
@@ -25,7 +31,7 @@ export const useAuth = () => {
           case 'admin':
             router.push('/admin');
             break;
-          case 'customer':
+          case 'customer_service':
             router.push('/my-account');
             break;
           case 'reader':

@@ -11,6 +11,8 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
+  TrendingUp,
+  Calendar,
   Phone
 } from 'lucide-react';
 import {
@@ -23,6 +25,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
 interface Bill {
   id: string;
@@ -55,11 +58,13 @@ function CustomerDashboard() {
   const [processing, setProcessing] = useState(false);
 
   // Get meter number from user (you'll need to add this to user object)
-  const meterNumber = user?.meter_number || 'WMTR001'; // Fallback for demo
+  const meterNumber = user?.meter_number || '';
 
   useEffect(() => {
-    fetchCustomerData();
-  }, []);
+    if (meterNumber) {
+      fetchCustomerData();
+    }
+  }, [meterNumber]);
 
   const fetchCustomerData = async () => {
     try {
@@ -77,7 +82,7 @@ function CustomerDashboard() {
         setBills(billsRes.data);
         
         // Find current pending bill
-        const pending = billsRes.data.find((b: Bill) => b.status === 'pending');
+        const pending = billsRes.data.find((b: Bill) => b.status === 'pending' || b.status === 'overdue');
         setCurrentBill(pending || null);
       }
 
@@ -113,10 +118,11 @@ function CustomerDashboard() {
       if (response.success) {
         toast.success('Payment initiated! Please check your phone for M-Pesa prompt.');
         setPaymentModal(false);
+        setPhoneNumber('');
         // Refresh data
         fetchCustomerData();
       } else {
-        toast.error('Payment failed');
+        toast.error(response.message || 'Payment failed');
       }
     } catch (error) {
       toast.error('Payment failed');
@@ -134,15 +140,18 @@ function CustomerDashboard() {
   const getStatusBadge = (status: string) => {
     switch(status) {
       case 'paid':
-        return <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs flex items-center gap-1"><CheckCircle size={12} /> Paid</span>;
+        return <span className="flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs"><CheckCircle size={12} /> Paid</span>;
       case 'pending':
-        return <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs flex items-center gap-1"><Clock size={12} /> Pending</span>;
+        return <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs"><Clock size={12} /> Pending</span>;
       case 'overdue':
-        return <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs flex items-center gap-1"><AlertCircle size={12} /> Overdue</span>;
+        return <span className="flex items-center gap-1 px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs"><AlertCircle size={12} /> Overdue</span>;
       default:
         return <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded-full text-xs">{status}</span>;
     }
   };
+
+  const totalConsumption = readings.reduce((sum, r) => sum + r.consumption, 0);
+  const avgConsumption = readings.length > 0 ? totalConsumption / readings.length : 0;
 
   if (loading) {
     return (
@@ -168,18 +177,18 @@ function CustomerDashboard() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Current Balance */}
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Current Balance</p>
-              <p className="text-3xl font-bold text-blue-600 mt-2">
+              <p className="text-2xl font-bold text-blue-600 mt-2">
                 KSh {customer?.balance?.toLocaleString() || 0}
               </p>
               {currentBill && (
                 <p className="text-xs text-gray-500 mt-1">
-                  Due: {new Date(currentBill.due_date).toLocaleDateString()}
+                  Due: {currentBill.due_date ? format(new Date(currentBill.due_date), 'dd MMM yyyy') : 'N/A'}
                 </p>
               )}
             </div>
@@ -194,7 +203,7 @@ function CustomerDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Current Bill</p>
-              <p className="text-3xl font-bold text-yellow-600 mt-2">
+              <p className="text-2xl font-bold text-yellow-600 mt-2">
                 KSh {currentBill?.balance?.toLocaleString() || 0}
               </p>
               {currentBill && getStatusBadge(currentBill.status)}
@@ -203,6 +212,14 @@ function CustomerDashboard() {
               <FileText className="w-6 h-6 text-yellow-600" />
             </div>
           </div>
+          {currentBill && currentBill.status !== 'paid' && (
+            <button
+              onClick={() => setPaymentModal(true)}
+              className="mt-4 w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 text-sm font-medium"
+            >
+              Pay Now
+            </button>
+          )}
         </div>
 
         {/* Total Consumption */}
@@ -210,15 +227,33 @@ function CustomerDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500">Total Consumption</p>
-              <p className="text-3xl font-bold text-green-600 mt-2">
-                {customer?.total_consumed?.toFixed(1) || 0} m³
+              <p className="text-2xl font-bold text-green-600 mt-2">
+                {totalConsumption.toFixed(1)} m³
               </p>
               <p className="text-xs text-gray-500 mt-1">
-                Avg: {((customer?.total_consumed || 0) / (bills.length || 1)).toFixed(1)} m³/month
+                Avg: {avgConsumption.toFixed(1)} m³/month
               </p>
             </div>
             <div className="p-3 bg-green-100 rounded-lg">
-              <Droplets className="w-6 h-6 text-green-600" />
+              <TrendingUp className="w-6 h-6 text-green-600" />
+            </div>
+          </div>
+        </div>
+
+        {/* Payment History */}
+        <div className="bg-white p-6 rounded-lg shadow-sm border">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-gray-500">Total Paid</p>
+              <p className="text-2xl font-bold text-purple-600 mt-2">
+                KSh {customer?.total_paid?.toLocaleString() || 0}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Lifetime payments
+              </p>
+            </div>
+            <div className="p-3 bg-purple-100 rounded-lg">
+              <CreditCard className="w-6 h-6 text-purple-600" />
             </div>
           </div>
         </div>
@@ -228,21 +263,27 @@ function CustomerDashboard() {
       <div className="bg-white p-6 rounded-lg shadow-sm border">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Water Consumption History</h2>
         <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
-              <Line 
-                type="monotone" 
-                dataKey="consumption" 
-                stroke="#3b82f6" 
-                strokeWidth={2}
-                dot={{ fill: '#3b82f6' }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="month" />
+                <YAxis />
+                <Tooltip />
+                <Line 
+                  type="monotone" 
+                  dataKey="consumption" 
+                  stroke="#3b82f6" 
+                  strokeWidth={2}
+                  dot={{ fill: '#3b82f6' }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-500">
+              No consumption data available
+            </div>
+          )}
         </div>
       </div>
 
@@ -261,8 +302,8 @@ function CustomerDashboard() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -280,22 +321,19 @@ function CustomerDashboard() {
                       <span className="text-green-600">KSh 0</span>
                     )}
                   </td>
-                  <td className="px-6 py-4">{getStatusBadge(bill.status)}</td>
-                  <td className="px-6 py-4 text-right">
-                    {bill.status === 'pending' && (
-                      <button
-                        onClick={() => {
-                          setCurrentBill(bill);
-                          setPaymentModal(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                      >
-                        Pay Now
-                      </button>
-                    )}
+                  <td className="px-6 py-4 text-sm">
+                    {bill.due_date ? format(new Date(bill.due_date), 'dd MMM yyyy') : 'N/A'}
                   </td>
+                  <td className="px-6 py-4">{getStatusBadge(bill.status)}</td>
                 </tr>
               ))}
+              {bills.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    No bills found
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -371,7 +409,7 @@ function CustomerDashboard() {
 
 export default function CustomerDashboardPage() {
   return (
-    <ProtectedRoute allowedRoles={['customer']}>
+    <ProtectedRoute allowedRoles={['customer_service']}>
       <CustomerDashboard />
     </ProtectedRoute>
   );

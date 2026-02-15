@@ -2,7 +2,16 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Users, FileText, CreditCard, Droplets, Settings, LayoutDashboard } from 'lucide-react';
+import { 
+  Home, 
+  Users, 
+  FileText, 
+  CreditCard, 
+  Droplets, 
+  Settings, 
+  LayoutDashboard,
+  Camera
+} from 'lucide-react';
 import { useAuth } from '@/lib/hooks/useAuth';
 
 export function Sidebar() {
@@ -11,23 +20,44 @@ export function Sidebar() {
 
   // Admin navigation items
   const adminNavItems = [
-    { href: '/dashboard', label: 'Dashboard', icon: Home },
+    { href: '/admin', label: 'Dashboard', icon: Home },
     { href: '/customers', label: 'Customers', icon: Users },
-     { href: '/users', label: 'Users', icon: Users },
+    { href: '/users', label: 'Users', icon: Users },
     { href: '/bills', label: 'Bills', icon: FileText },
     { href: '/payments', label: 'Payments', icon: CreditCard },
-    { href: '/consumption', label: 'Consumption', icon: Droplets },
     { href: '/settings', label: 'Settings', icon: Settings },
   ];
 
-  // Customer navigation items (limited)
-  const customerNavItems = [
-    { href: '/customer/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { href: '/customer/bills', label: 'My Bills', icon: FileText },
-    { href: '/customer/payments', label: 'Payments', icon: CreditCard },
+  // Reader navigation items
+  const readerNavItems = [
+    { href: '/reader/dashboard', label: 'Meter Reading', icon: Camera },
+    { href: '/reader/history', label: 'My Readings', icon: FileText },
+    { href: '/reader/settings', label: 'Settings', icon: Settings },
   ];
 
-  const navItems = user?.role === 'admin' ? adminNavItems : customerNavItems;
+  // Customer navigation items
+  const customerNavItems = [
+    { href: '/my-account', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/my-account/bills', label: 'My Bills', icon: FileText },
+    { href: '/my-account/payments', label: 'Payments', icon: CreditCard },
+  ];
+
+  // Select nav items based on user role
+  const getNavItems = () => {
+    if (!user) return [];
+    switch (user.role) {
+      case 'admin':
+        return adminNavItems;
+      case 'reader':
+        return readerNavItems;
+      case 'customer_service':
+        return customerNavItems;
+      default:
+        return [];
+    }
+  };
+
+  const navItems = getNavItems();
 
   return (
     <aside className="w-64 h-screen bg-white border-r fixed left-0 top-0">

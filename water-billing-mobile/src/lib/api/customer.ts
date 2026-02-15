@@ -7,6 +7,11 @@ export const customerApi = {
     return response.data;
   },
 
+   create: async (customerData: any) => {
+    const response = await apiClient.post('/customers', customerData);
+    return response.data;
+  },
+
   // Get customer by meter number
   getCustomerByMeter: async (meterNumber: string) => {
     const response = await apiClient.get(`/customers/meter/${meterNumber}`);

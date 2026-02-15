@@ -1,25 +1,53 @@
 "use client";
 
 import { usePathname } from 'next/navigation';
-import { Bell, User } from 'lucide-react';
+import { Menu, Bell, User } from 'lucide-react';
+import { useAuth } from '@/lib/hooks/useAuth';
 
-export function Header() {
+interface HeaderProps {
+  onMenuClick: () => void;
+}
+
+export function Header({ onMenuClick }: HeaderProps) {
   const pathname = usePathname();
-  const pageName = pathname.split('/').filter(Boolean).pop() || 'Dashboard';
-  const title = pageName.charAt(0).toUpperCase() + pageName.slice(1);
+  const { user } = useAuth();
+
+  const getPageTitle = () => {
+    const path = pathname.split('/').filter(Boolean);
+    if (path.length === 0) return 'Dashboard';
+    // Handle paths like /my-account/bills -> show "Bills"
+    const lastSegment = path[path.length - 1];
+    return lastSegment.charAt(0).toUpperCase() + lastSegment.slice(1);
+  };
 
   return (
-    <header className="h-16 bg-white border-b flex items-center justify-between px-6 fixed top-0 left-64 right-0">
-      <h1 className="text-xl font-semibold">{title}</h1>
-      <div className="flex items-center gap-4">
-        <button className="p-2 hover:bg-gray-100 rounded-lg">
-          <Bell className="w-5 h-5" />
-        </button>
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-            <User className="w-4 h-4 text-blue-600" />
+    <header className="h-16 bg-white border-b flex items-center px-4 md:px-6">
+      <div className="flex items-center justify-between w-full">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onMenuClick}
+            className="p-2 rounded-lg hover:bg-gray-100 lg:hidden"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+          <h1 className="text-xl font-semibold capitalize">
+            {getPageTitle()}
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <button className="p-2 hover:bg-gray-100 rounded-lg relative">
+            <Bell className="w-5 h-5" />
+          </button>
+          
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+              <User className="w-4 h-4 text-blue-600" />
+            </div>
+            <span className="hidden sm:block text-sm font-medium">
+              {user?.first_name || user?.username || 'User'}
+            </span>
           </div>
-          <span className="text-sm font-medium">Admin</span>
         </div>
       </div>
     </header>

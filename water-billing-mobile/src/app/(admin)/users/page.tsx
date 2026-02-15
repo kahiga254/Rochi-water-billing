@@ -36,7 +36,7 @@ function UsersPage() {
       setLoading(true);
       const response = await userApi.getUsers();
       if (response.success) {
-        setUsers(response.data || []);
+        setUsers(response.data.users || []);
       }
     } catch (error) {
       toast.error('Failed to load users');
@@ -45,22 +45,28 @@ function UsersPage() {
     }
   };
 
-  const handleCreateUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const response = await userApi.createUser(formData as CreateUserData);
-      if (response.success) {
-        toast.success('User created successfully');
-        setShowCreateModal(false);
-        setFormData({ role: 'reader' });
-        fetchUsers();
-      } else {
-        toast.error(response.message || 'Failed to create user');
-      }
-    } catch (error) {
+ const handleCreateUser = async (e: React.FormEvent) => {
+  e.preventDefault();
+  try {
+    const response = await userApi.createUser(formData as CreateUserData);
+    if (response.success) {
+      toast.success('User created successfully');
+      setShowCreateModal(false);
+      setFormData({ role: 'reader' });
+      fetchUsers(); // Refresh the list
+    } else {
+      // Show the specific error message from the backend
+      toast.error(response.message || 'Failed to create user');
+    }
+  } catch (error: any) {
+    // Handle 409 Conflict specifically
+    if (error.response?.status === 409) {
+      toast.error('User already exists. Please try a different username or email.');
+    } else {
       toast.error('Failed to create user');
     }
-  };
+  }
+};
 
   const handleDeleteUser = async (id: string) => {
     if (!confirm('Are you sure you want to delete this user?')) return;

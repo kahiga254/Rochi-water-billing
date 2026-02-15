@@ -238,7 +238,7 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 			users.Use(middleware.RoleMiddleware("admin"))
 			{
 				users.POST("", h.Auth.Register)
-				// Additional user management endpoints can be added here
+				users.GET("", h.Auth.GetUsers)
 			}
 
 			// Profile routes (authenticated users)

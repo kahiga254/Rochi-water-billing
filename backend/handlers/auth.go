@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"waterbilling/backend/services"
 
 	"github.com/gin-gonic/gin"
+	"go.mongodb.org/mongo-driver/bson"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -455,6 +457,39 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	// In JWT, logout is handled client-side by discarding the token
 	// We could implement token blacklisting if needed
 	SuccessResponse(c, "Logout successful", nil)
+}
+
+// GetUsers returns all users (admin only)
+// GetUsers returns all users (admin only)
+func (h *AuthHandler) GetUsers(c *gin.Context) {
+	// Parse query parameters
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	role := c.Query("role")
+
+	// Build filter
+	filter := bson.M{}
+	if role != "" {
+		filter["role"] = role
+	}
+
+	// Get users from service (returns 3 values)
+	users, total, err := h.userService.ListUsers(filter, int64(page), int64(limit))
+	if err != nil {
+		InternalServerError(c, "Failed to fetch users", err)
+		return
+	}
+
+	// Calculate total pages
+	totalPages := (total + int64(limit) - 1) / int64(limit)
+
+	SuccessResponse(c, "Users retrieved successfully", gin.H{
+		"users":       users,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"total_pages": totalPages,
+	})
 }
 
 // Request/Response DTOs

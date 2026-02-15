@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/hooks/useAuth';
 
@@ -11,19 +11,43 @@ interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, token, isLoading, checkAuth } = useAuth();
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    if (!isLoading) {
-      if (!isAuthenticated) {
-        router.push('/login');
-      } else if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-        router.push('/unauthorized');
+    const verifyAuth = async () => {
+      // Check if token exists in localStorage directly
+      const storedToken = localStorage.getItem('token');
+      
+      if (!storedToken) {
+        console.log('No token found, redirecting to login');
+        router.replace('/login');
+        return;
       }
-    }
-  }, [isAuthenticated, isLoading, user, router, allowedRoles]);
 
-  if (isLoading) {
+      // If we have a token but no user, try to check auth
+      if (storedToken && !user) {
+        await checkAuth();
+      }
+
+      // Check role authorization
+      if (user) {
+        if (allowedRoles && !allowedRoles.includes(user.role)) {
+          console.log(`Role ${user.role} not authorized`);
+          router.replace('/unauthorized');
+          return;
+        }
+        setIsAuthorized(true);
+      }
+    };
+
+    if (!isLoading) {
+      verifyAuth();
+    }
+  }, [isLoading, user, token, router, allowedRoles, checkAuth]);
+
+  // Show loading while checking
+  if (isLoading || !isAuthorized) {
     return (
       <div className="h-screen flex items-center justify-center">
         <div className="text-center">
@@ -32,14 +56,6 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
         </div>
       </div>
     );
-  }
-
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return null;
   }
 
   return <>{children}</>;
