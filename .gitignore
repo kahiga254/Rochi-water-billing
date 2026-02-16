@@ -41,3 +41,5 @@ next-env.d.ts
 *.exe
 *.dll
 *.sst
+water-billing-mobile/.next/
+water-billing-mobile/node_modules/
