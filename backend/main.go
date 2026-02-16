@@ -111,7 +111,7 @@ func initializeServices(collections *Collections) *Services {
 		collections.Bills,
 		collections.Payments,
 		collections.Tariffs,
-		smsService, // ✅ ADDED: SMS service for automatic bill notifications
+		smsService,
 	)
 
 	// User Service
@@ -137,8 +137,9 @@ type Handlers struct {
 
 func initializeHandlers(svc *Services) *Handlers {
 	return &Handlers{
-		Customer:  handlers.NewCustomerHandler(svc.Customer),
-		Billing:   handlers.NewBillingHandler(svc.Billing),
+		Customer: handlers.NewCustomerHandler(svc.Customer),
+		// ✅ Updated: Pass both Billing and User services to BillingHandler
+		Billing:   handlers.NewBillingHandler(svc.Billing, svc.User),
 		SMS:       handlers.NewSMSHandler(svc.Billing, svc.SMS),
 		Dashboard: handlers.NewDashboardHandler(svc.Billing, svc.Customer),
 		Auth:      handlers.NewAuthHandler(svc.User, svc.JWT),
@@ -169,9 +170,7 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 			public.POST("/login", h.Auth.Login)
 			public.POST("/refresh-token", h.Auth.RefreshToken)
 			public.POST("/register", h.Auth.Register)
-
-			// COMMENT OUT AFTER FIRST USE: public.POST("/setup-admin", setupInitialAdmin)
-			public.POST("/setup-admin", setupInitialAdmin) // Endpoint to create initial admin user
+			public.POST("/setup-admin", setupInitialAdmin)
 		}
 
 		// Protected routes (require authentication)
@@ -181,7 +180,6 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 			// Customer routes
 			customers := protected.Group("/customers")
 			{
-
 				customers.GET("", middleware.RoleMiddleware("admin", "manager"), h.Customer.GetCustomers)
 				customers.POST("", middleware.RoleMiddleware("admin", "manager"), h.Customer.CreateCustomer)
 				customers.GET("/meter/:meterNumber", h.Customer.GetCustomerByMeterNumber)
@@ -208,6 +206,8 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 				billing.GET("/bills/overdue", middleware.RoleMiddleware("admin", "manager", "cashier"), h.Billing.GetOverdueBills)
 				billing.GET("/bills/unpaid", middleware.RoleMiddleware("admin", "manager", "cashier"), h.Billing.GetUnpaidBills)
 				billing.POST("/bills/:billID/pay", middleware.RoleMiddleware("admin", "cashier"), h.Billing.ProcessPayment)
+				// ✅ Added my-readings endpoint
+				billing.GET("/readings/my-readings", middleware.RoleMiddleware("reader"), h.Billing.GetMyReadings)
 
 				// Summary and reports
 				billing.GET("/summary", middleware.RoleMiddleware("admin", "manager"), h.Billing.GetBillingSummary)
@@ -254,10 +254,7 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 		// Webhook routes (public but with secret validation)
 		webhooks := api.Group("/webhooks")
 		{
-			// SMS delivery callbacks
 			webhooks.POST("/sms-delivery", handleSMSDeliveryWebhook)
-
-			// Payment gateway callbacks (M-Pesa, etc.)
 			webhooks.POST("/mpesa-callback", handleMpesaWebhook)
 		}
 	}
@@ -294,7 +291,6 @@ func startServer(router *gin.Engine) {
 
 // Health check endpoint
 func healthCheck(c *gin.Context) {
-	// Check database connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -365,7 +361,6 @@ func handleSMSDeliveryWebhook(c *gin.Context) {
 		return
 	}
 
-	// Validate webhook secret (optional but recommended)
 	secret := c.GetHeader("X-Webhook-Secret")
 	expectedSecret := os.Getenv("WEBHOOK_SECRET")
 
@@ -374,18 +369,11 @@ func handleSMSDeliveryWebhook(c *gin.Context) {
 		return
 	}
 
-	// Process delivery status update
-	// Update SMS log in database
-	// This would typically update the sms_logs collection
-
 	c.JSON(200, gin.H{"status": "processed"})
 }
 
 // M-Pesa webhook handler
 func handleMpesaWebhook(c *gin.Context) {
-	// Handle M-Pesa payment callbacks
-	// This would integrate with payment processing
-
 	c.JSON(200, gin.H{"status": "received"})
 }
 
@@ -420,10 +408,8 @@ func setupInitialAdmin(c *gin.Context) {
 		return
 	}
 
-	// Get users collection directly
 	collections := initializeCollections()
 
-	// Check if any users exist
 	count, err := collections.Users.CountDocuments(c.Request.Context(), gin.H{})
 	if err != nil {
 		c.JSON(500, gin.H{
@@ -434,7 +420,6 @@ func setupInitialAdmin(c *gin.Context) {
 		return
 	}
 
-	// Only allow this if no users exist (first time setup)
 	if count > 0 {
 		c.JSON(403, gin.H{
 			"success": false,
@@ -444,7 +429,6 @@ func setupInitialAdmin(c *gin.Context) {
 		return
 	}
 
-	// Hash the password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		c.JSON(500, gin.H{
@@ -455,7 +439,6 @@ func setupInitialAdmin(c *gin.Context) {
 		return
 	}
 
-	// Create user document matching your User struct
 	now := time.Now()
 	user := bson.M{
 		"_id":           primitive.NewObjectID(),
@@ -469,14 +452,13 @@ func setupInitialAdmin(c *gin.Context) {
 		"department":    "Administration",
 		"employee_id":   "ADMIN001",
 		"assigned_zone": nil,
-		"permissions":   []string{"*"}, // Full access
+		"permissions":   []string{"*"},
 		"is_active":     true,
 		"last_login":    nil,
 		"created_at":    now,
 		"updated_at":    now,
 	}
 
-	// Insert directly into MongoDB
 	result, err := collections.Users.InsertOne(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{

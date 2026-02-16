@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { useAuth } from '@/lib/hooks/useAuth';
 import { readerApi } from '@/lib/api/reader';
@@ -38,6 +38,8 @@ interface Customer {
 
 function ReaderDashboardContent() {
   const { user } = useAuth();
+  console.log('👤 Reader user:', user); // Debug log
+
   const [meterNumber, setMeterNumber] = useState('');
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [currentReading, setCurrentReading] = useState('');
@@ -46,6 +48,8 @@ function ReaderDashboardContent() {
   const [searched, setSearched] = useState(false);
 
   const searchCustomer = async () => {
+    console.log('🔍 Searching for meter:', meterNumber); // Debug log
+    
     if (!meterNumber.trim()) {
       toast.error('Please enter a meter number');
       return;
@@ -54,17 +58,22 @@ function ReaderDashboardContent() {
     try {
       setLoading(true);
       setSearched(true);
+      console.log('📡 Calling API for meter:', meterNumber);
+      
       const response = await readerApi.getCustomerByMeter(meterNumber);
+      console.log('📥 API Response:', response); // Debug log
       
       if (response.success) {
+        console.log('✅ Customer found:', response.data);
         setCustomer(response.data);
         toast.success('Customer found');
       } else {
+        console.log('❌ Customer not found');
         setCustomer(null);
         toast.error('Customer not found');
       }
     } catch (error) {
-      console.error('Search error:', error);
+      console.error('💥 Search error:', error);
       toast.error('Failed to search customer');
       setCustomer(null);
     } finally {
@@ -73,6 +82,8 @@ function ReaderDashboardContent() {
   };
 
   const handleSubmitReading = async () => {
+    console.log('📝 Submitting reading:', currentReading); // Debug log
+    
     if (!customer) return;
     
     const reading = parseFloat(currentReading);
@@ -88,12 +99,18 @@ function ReaderDashboardContent() {
 
     try {
       setSubmitting(true);
+      console.log('📡 Submitting to API:', {
+        meter_number: customer.meter_number,
+        current_reading: reading
+      });
       
       const response = await readerApi.submitReading({
         meter_number: customer.meter_number,
         current_reading: reading,
         notes: `Reading taken by ${user?.first_name} ${user?.last_name}`
       });
+
+      console.log('📥 Submit response:', response); // Debug log
 
       if (response.success) {
         toast.success('Reading submitted successfully! SMS sent to customer.');
@@ -105,7 +122,7 @@ function ReaderDashboardContent() {
         toast.error(response.message || 'Failed to submit reading');
       }
     } catch (error) {
-      console.error('Submission error:', error);
+      console.error('💥 Submission error:', error);
       toast.error('Failed to submit reading');
     } finally {
       setSubmitting(false);
@@ -118,13 +135,17 @@ function ReaderDashboardContent() {
     }
   };
 
+  // Debug render
+  console.log('🔄 Render state:', { loading, submitting, searched, hasCustomer: !!customer });
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 p-4">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Meter Reading</h1>
         <p className="text-gray-600 mt-1">Enter meter number to record reading</p>
       </div>
 
+      {/* Search Section */}
       <div className="bg-white rounded-lg shadow-sm border p-6">
         <label className="block text-sm font-medium text-gray-700 mb-2">
           Meter Number
@@ -135,7 +156,10 @@ function ReaderDashboardContent() {
             <input
               type="text"
               value={meterNumber}
-              onChange={(e) => setMeterNumber(e.target.value.toUpperCase())}
+              onChange={(e) => {
+                console.log('📝 Meter input:', e.target.value); // Debug log
+                setMeterNumber(e.target.value.toUpperCase());
+              }}
               onKeyPress={handleKeyPress}
               placeholder="Enter meter number (e.g., WMTR001)"
               className="w-full pl-10 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -162,10 +186,12 @@ function ReaderDashboardContent() {
         </div>
       </div>
 
+      {/* Customer Details & Reading Form */}
       {searched && (
         <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
           {customer ? (
             <>
+              {/* Customer Details */}
               <div className="p-6 border-b bg-gray-50">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
@@ -205,7 +231,7 @@ function ReaderDashboardContent() {
                     <Home size={18} className="text-gray-400 mt-0.5" />
                     <div>
                       <p className="text-sm text-gray-500">Address</p>
-                      <p className="font-medium">{customer.address.street_address}, {customer.address.city}</p>
+                      <p className="font-medium">{customer.address?.street_address}, {customer.address?.city}</p>
                     </div>
                   </div>
                   
@@ -250,6 +276,7 @@ function ReaderDashboardContent() {
                 </div>
               </div>
 
+              {/* Reading Form */}
               <div className="p-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <Droplets size={20} className="text-blue-600" />
@@ -343,6 +370,7 @@ function ReaderDashboardContent() {
         </div>
       )}
 
+      {/* Quick Tips */}
       <div className="bg-white rounded-lg shadow-sm border p-4">
         <div className="flex items-start gap-3">
           <div className="p-2 bg-blue-100 rounded-lg">

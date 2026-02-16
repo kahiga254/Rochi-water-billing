@@ -16,11 +16,14 @@ import (
 
 type BillingHandler struct {
 	billingService *services.BillingService
+	userService    *services.UserService
 }
 
-func NewBillingHandler(billingService *services.BillingService) *BillingHandler {
+// Update this function signature to accept userService
+func NewBillingHandler(billingService *services.BillingService, userService *services.UserService) *BillingHandler {
 	return &BillingHandler{
 		billingService: billingService,
+		userService:    userService, // Now userService is defined
 	}
 }
 
@@ -44,6 +47,20 @@ func (h *BillingHandler) SubmitMeterReading(c *gin.Context) {
 		return
 	}
 
+	// Get the authenticated user's ID from context (set by auth middleware)
+	userID, exists := c.Get("userID")
+	if !exists {
+		Unauthorized(c, "User not authenticated")
+		return
+	}
+
+	// Get user details to get the reader's name
+	user, err := h.userService.GetUserByID(userID.(string))
+	if err != nil {
+		InternalServerError(c, "Failed to get user details", err)
+		return
+	}
+
 	// Set default values
 	if req.ReadingDate.IsZero() {
 		req.ReadingDate = time.Now()
@@ -57,15 +74,22 @@ func (h *BillingHandler) SubmitMeterReading(c *gin.Context) {
 		req.ReadingMethod = "mobile_app"
 	}
 
-	// Create meter reading model
+	// Convert userID string to ObjectID
+	readerObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		InternalServerError(c, "Invalid user ID format", err)
+		return
+	}
+
+	// Create meter reading model with the authenticated user's ID
 	reading := &models.MeterReading{
 		MeterNumber:    req.MeterNumber,
 		CurrentReading: req.CurrentReading,
 		ReadingDate:    req.ReadingDate,
 		ReadingType:    req.ReadingType,
 		ReadingMethod:  req.ReadingMethod,
-		ReaderID:       req.ReaderID,
-		ReaderName:     req.ReaderName,
+		ReaderID:       readerObjectID,                       // Set from authenticated user
+		ReaderName:     user.FirstName + " " + user.LastName, // Set from user object
 		Location:       req.Location,
 		MeterPhotoURL:  req.MeterPhotoURL,
 		MeterCondition: req.MeterCondition,
@@ -274,6 +298,33 @@ func (h *BillingHandler) GetBillingSummary(c *gin.Context) {
 	}
 
 	SuccessResponse(c, "Billing summary retrieved", summary)
+}
+
+// GetMyReadings returns readings submitted by the authenticated reader
+func (h *BillingHandler) GetMyReadings(c *gin.Context) {
+	// Get reader ID from context (set by auth middleware)
+	readerID, exists := c.Get("userID")
+	if !exists {
+		Unauthorized(c, "User not authenticated") // ✅ Just call Unauthorized directly
+		return
+	}
+
+	// Parse optional query params for pagination
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+
+	readings, total, err := h.billingService.GetReadingsByReader(readerID.(string), page, limit)
+	if err != nil {
+		InternalServerError(c, "Failed to fetch readings", err) // ✅ Just call InternalServerError directly
+		return
+	}
+
+	SuccessResponse(c, "Readings retrieved", gin.H{ // ✅ Just call SuccessResponse directly
+		"readings": readings,
+		"total":    total,
+		"page":     page,
+		"limit":    limit,
+	})
 }
 
 // BulkSubmitReadings submits multiple meter readings

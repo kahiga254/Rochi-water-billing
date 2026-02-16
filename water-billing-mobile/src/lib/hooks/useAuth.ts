@@ -35,7 +35,7 @@ export const useAuth = () => {
             router.push('/my-account');
             break;
           case 'reader':
-            router.push('/reader/dashboard');
+            router.push('/reader-direct/dashboard');
             break;
           default:
             router.push('/dashboard');

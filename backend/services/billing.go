@@ -571,6 +571,43 @@ func (bs *BillingService) GetUnpaidBills() ([]models.Bill, error) {
 	return bills, nil
 }
 
+// GetReadingsByReader retrieves readings for a specific reader ID
+func (s *BillingService) GetReadingsByReader(readerID string, page, limit int) ([]models.MeterReading, int64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	objectID, err := primitive.ObjectIDFromHex(readerID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("invalid reader ID format")
+	}
+
+	filter := bson.M{"reader_id": objectID}
+	skip := (page - 1) * limit
+
+	opts := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"reading_date": -1})
+
+	cursor, err := s.readingsCollection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer cursor.Close(ctx)
+
+	var readings []models.MeterReading
+	if err = cursor.All(ctx, &readings); err != nil {
+		return nil, 0, err
+	}
+
+	total, err := s.readingsCollection.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return readings, total, nil
+}
+
 // GetBillingSummary returns billing summary for a period
 func (bs *BillingService) GetBillingSummary(startDate, endDate time.Time) (*BillingSummary, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -29,11 +29,12 @@ export function Sidebar() {
   ];
 
   // Reader navigation items
-  const readerNavItems = [
-    { href: '/reader/dashboard', label: 'Meter Reading', icon: Camera },
-    { href: '/reader/history', label: 'My Readings', icon: FileText },
-    { href: '/reader/settings', label: 'Settings', icon: Settings },
-  ];
+const readerNavItems = [
+  { href: '/reader-direct/dashboard', label: 'Meter Reading', icon: Camera },
+  { href: '/reader-direct/history', label: 'My Readings', icon: FileText },
+  { href: '/reader-direct/settings', label: 'Settings', icon: Settings },
+];
+  
 
   // Customer navigation items
   const customerNavItems = [
