@@ -1,51 +1,26 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
-.yarn/install-state.gz
+# Dependencies
+water-billing-mobile/node_modules/
+water-billing-mobile/package-lock.json
 
-# next.js
-/.next/
-/out/
-/build
+# Build outputs
+water-billing-mobile/.next/
+water-billing-mobile/out/
+water-billing-mobile/build/
+water-billing-mobile/dist/
 
-# production
-/dist
-
-# misc
-.DS_Store
-*.pem
-
-# debug
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# local env files
-.env*.local
+# Environment
 .env
+.env.local
+.env.development.local
 
-# vercel
-.vercel
+# Logs
+*.log
+npm-debug.log*
 
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# OS files
+.DS_Store
+Thumbs.db
 
 # IDE
 .vscode/
 .idea/
-
-# large binary files
-*.node
-*.exe
-*.dll
-*.sst
-water-billing-mobile/.next/
-water-billing-mobile/node_modules/
-water-billing-mobile/node_modules/
-water-billing-mobile/.next/
-water-billing-mobile/out/
-water-billing-mobile/build/
-*.log
-.env
