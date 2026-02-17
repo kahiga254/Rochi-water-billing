@@ -43,3 +43,9 @@ next-env.d.ts
 *.sst
 water-billing-mobile/.next/
 water-billing-mobile/node_modules/
+water-billing-mobile/node_modules/
+water-billing-mobile/.next/
+water-billing-mobile/out/
+water-billing-mobile/build/
+*.log
+.env
