@@ -197,6 +197,7 @@ type User struct {
 	Username     string             `bson:"username" json:"username"`
 	Password     string             `bson:"password" json:"-"` // Hashed password
 	Role         string             `bson:"role" json:"role"`  // "admin", "reader", "cashier", "manager", "customer_service"
+	MeterNumber  string             `bson:"meter_number,omitempty" json:"meter_number,omitempty"`
 	Department   string             `bson:"department,omitempty" json:"department,omitempty"`
 	EmployeeID   string             `bson:"employee_id,omitempty" json:"employee_id,omitempty"`
 	AssignedZone string             `bson:"assigned_zone,omitempty" json:"assigned_zone,omitempty"` // For meter readers

@@ -13,7 +13,8 @@ import {
   Clock,
   TrendingUp,
   Calendar,
-  Phone
+  Phone,
+  RefreshCw
 } from 'lucide-react';
 import {
   LineChart,
@@ -56,48 +57,92 @@ function CustomerDashboard() {
   const [paymentModal, setPaymentModal] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [apiResponse, setApiResponse] = useState<any>(null);
 
-  // Get meter number from user (you'll need to add this to user object)
   const meterNumber = user?.meter_number || '';
 
   useEffect(() => {
     if (meterNumber) {
       fetchCustomerData();
+    } else {
+      console.warn('No meter number found for user');
+      setLoading(false);
+      setError('No meter number associated with this account');
     }
   }, [meterNumber]);
 
   const fetchCustomerData = async () => {
     try {
       setLoading(true);
+      setError(null);
+      console.log('🚀 Fetching data for meter:', meterNumber);
       
       // Fetch customer details
       const customerRes = await customerApi.getCustomerByMeter(meterNumber);
-      if (customerRes.success) {
+      console.log('📥 Customer API Response:', customerRes);
+      
+      if (customerRes && customerRes.success) {
         setCustomer(customerRes.data);
+        console.log('✅ Customer data set:', customerRes.data);
+      } else {
+        console.warn('❌ Customer fetch failed:', customerRes?.message);
       }
 
       // Fetch bills
       const billsRes = await customerApi.getBills(meterNumber);
-      if (billsRes.success) {
-        setBills(billsRes.data);
+      console.log('📥 Bills API Response:', billsRes);
+      
+      if (billsRes && billsRes.success) {
+        let billsData: Bill[] = [];
+        
+        if (Array.isArray(billsRes.data)) {
+          billsData = billsRes.data;
+        } else if (billsRes.data && Array.isArray(billsRes.data.bills)) {
+          billsData = billsRes.data.bills;
+        } else {
+          billsData = [];
+        }
+        
+        setBills(billsData);
+        console.log('✅ Bills data set:', billsData);
         
         // Find current pending bill
-        const pending = billsRes.data.find((b: Bill) => b.status === 'pending' || b.status === 'overdue');
+        const pending = billsData.find((b: Bill) => b.status === 'pending' || b.status === 'overdue');
         setCurrentBill(pending || null);
+        console.log('💰 Current pending bill:', pending);
       }
 
-      // Fetch reading history for chart
+      // Fetch reading history
       const readingsRes = await customerApi.getReadingHistory(meterNumber);
-      if (readingsRes.success) {
-        setReadings(readingsRes.data);
+      console.log('📥 Readings API Response:', readingsRes);
+      
+      if (readingsRes && readingsRes.success) {
+        let readingsData: Reading[] = [];
+        
+        if (Array.isArray(readingsRes.data)) {
+          readingsData = readingsRes.data;
+        } else if (readingsRes.data && Array.isArray(readingsRes.data.readings)) {
+          readingsData = readingsRes.data.readings;
+        } else {
+          readingsData = [];
+        }
+        
+        setReadings(readingsData);
+        console.log('✅ Readings data set:', readingsData);
       }
 
     } catch (error) {
-      console.error('Failed to fetch customer data:', error);
+      console.error('💥 Error in fetchCustomerData:', error);
+      setError('Failed to load dashboard data. Please try again.');
       toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRefresh = () => {
+    fetchCustomerData();
   };
 
   const handlePayment = async () => {
@@ -131,6 +176,16 @@ function CustomerDashboard() {
     }
   };
 
+  // Calculate totals
+  const totalConsumption = readings.reduce((sum, r) => sum + r.consumption, 0);
+  const avgConsumption = readings.length > 0 ? totalConsumption / readings.length : 0;
+  
+  // Calculate balance from bills
+  const totalBalance = bills.reduce((sum, bill) => sum + bill.balance, 0);
+  
+  // Get latest customer balance or use calculated balance
+  const displayBalance = customer?.balance !== undefined ? customer.balance : totalBalance;
+
   // Prepare chart data
   const chartData = readings.slice(0, 12).reverse().map(r => ({
     month: r.billing_period,
@@ -150,8 +205,30 @@ function CustomerDashboard() {
     }
   };
 
-  const totalConsumption = readings.reduce((sum, r) => sum + r.consumption, 0);
-  const avgConsumption = readings.length > 0 ? totalConsumption / readings.length : 0;
+  // Format balance with proper sign and color
+  const formatBalance = (balance: number) => {
+    if (balance > 0) {
+      return {
+        text: `KSh ${balance.toLocaleString()}`,
+        className: "text-red-600",
+        label: "Outstanding Balance"
+      };
+    } else if (balance < 0) {
+      return {
+        text: `KSh ${Math.abs(balance).toLocaleString()}`,
+        className: "text-green-600",
+        label: "Credit Balance"
+      };
+    } else {
+      return {
+        text: "KSh 0",
+        className: "text-gray-900",
+        label: "Current Balance"
+      };
+    }
+  };
+
+  const balanceDisplay = formatBalance(displayBalance);
 
   if (loading) {
     return (
@@ -164,31 +241,86 @@ function CustomerDashboard() {
     );
   }
 
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              Welcome back, {user?.first_name}!
+            </h1>
+            <p className="text-gray-600 mt-1">
+              Meter Number: <span className="font-mono font-medium">{meterNumber}</span>
+            </p>
+          </div>
+          <button
+            onClick={handleRefresh}
+            className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+            title="Refresh data"
+          >
+            <RefreshCw size={20} />
+          </button>
+        </div>
+        
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-800">Failed to load data</p>
+              <p className="text-sm text-red-600 mt-1">{error}</p>
+              <button
+                onClick={handleRefresh}
+                className="mt-4 flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-sm"
+              >
+                <RefreshCw size={16} />
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Welcome Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          Welcome back, {customer?.first_name || user?.first_name}!
-        </h1>
-        <p className="text-gray-600 mt-1">
-          Meter Number: <span className="font-mono font-medium">{meterNumber}</span>
-        </p>
+      {/* Welcome Header with Refresh Button */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">
+            Welcome back, {customer?.first_name || user?.first_name}!
+          </h1>
+          <p className="text-gray-600 mt-1">
+            Meter Number: <span className="font-mono font-medium">{meterNumber}</span>
+          </p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          className="p-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+          title="Refresh data"
+        >
+          <RefreshCw size={20} />
+        </button>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Current Balance */}
+        {/* Current Balance - UPDATED WITH PROPER FORMATTING */}
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500">Current Balance</p>
-              <p className="text-2xl font-bold text-blue-600 mt-2">
-                KSh {customer?.balance?.toLocaleString() || 0}
+              <p className="text-sm text-gray-500">{balanceDisplay.label}</p>
+              <p className={`text-2xl font-bold mt-2 ${balanceDisplay.className}`}>
+                {balanceDisplay.text}
               </p>
-              {currentBill && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Due: {currentBill.due_date ? format(new Date(currentBill.due_date), 'dd MMM yyyy') : 'N/A'}
+              {displayBalance < 0 && (
+                <p className="text-xs text-green-600 mt-1">
+                  You have credit available for future bills
+                </p>
+              )}
+              {displayBalance > 0 && (
+                <p className="text-xs text-red-600 mt-1">
+                  Please pay to avoid service interruption
                 </p>
               )}
             </div>
@@ -240,7 +372,7 @@ function CustomerDashboard() {
           </div>
         </div>
 
-        {/* Payment History */}
+        {/* Total Paid */}
         <div className="bg-white p-6 rounded-lg shadow-sm border">
           <div className="flex items-center justify-between">
             <div>
@@ -262,7 +394,7 @@ function CustomerDashboard() {
       {/* Consumption Chart */}
       <div className="bg-white p-6 rounded-lg shadow-sm border">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Water Consumption History</h2>
-        <div className="h-64">
+        <div className="h-64 w-full">
           {chartData.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData}>
@@ -287,10 +419,13 @@ function CustomerDashboard() {
         </div>
       </div>
 
-      {/* Bills Table */}
+      {/* Recent Bills (Last 5) */}
       <div className="bg-white rounded-lg shadow-sm border overflow-hidden">
-        <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">Bill History</h2>
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">Recent Bills</h2>
+          <a href="/my-account/bills" className="text-sm text-blue-600 hover:text-blue-800">
+            View All
+          </a>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -298,20 +433,17 @@ function CustomerDashboard() {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Bill No.</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Consumption</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Balance</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {bills.map((bill) => (
+              {bills.slice(0, 5).map((bill) => (
                 <tr key={bill.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm">{bill.billing_period}</td>
                   <td className="px-6 py-4 text-sm font-mono">{bill.bill_number}</td>
-                  <td className="px-6 py-4 text-sm">{bill.consumption.toFixed(1)} m³</td>
                   <td className="px-6 py-4 text-sm">KSh {bill.total_amount.toLocaleString()}</td>
                   <td className="px-6 py-4 text-sm">KSh {bill.amount_paid.toLocaleString()}</td>
                   <td className="px-6 py-4 text-sm font-medium">
@@ -321,19 +453,9 @@ function CustomerDashboard() {
                       <span className="text-green-600">KSh 0</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-sm">
-                    {bill.due_date ? format(new Date(bill.due_date), 'dd MMM yyyy') : 'N/A'}
-                  </td>
                   <td className="px-6 py-4">{getStatusBadge(bill.status)}</td>
                 </tr>
               ))}
-              {bills.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
-                    No bills found
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>

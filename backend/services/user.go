@@ -84,6 +84,7 @@ func (s *UserService) GetUserByID(id string) (*models.User, error) {
 }
 
 // CreateUser creates a new user
+// CreateUser creates a new user
 func (s *UserService) CreateUser(user *models.User, password string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -110,6 +111,11 @@ func (s *UserService) CreateUser(user *models.User, password string) error {
 	user.ID = primitive.NewObjectID()
 	user.CreatedAt = time.Now()
 	user.UpdatedAt = time.Now()
+
+	// Set default values for new fields if needed
+	if user.MeterNumber == "" {
+		user.MeterNumber = "" // This is fine, it can be empty for non-customers
+	}
 
 	_, err = s.collection.InsertOne(ctx, user)
 	if err != nil {

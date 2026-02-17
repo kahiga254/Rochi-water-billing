@@ -7,11 +7,6 @@ export const customerApi = {
     return response.data;
   },
 
-   create: async (customerData: any) => {
-    const response = await apiClient.post('/customers', customerData);
-    return response.data;
-  },
-
   // Get customer by meter number
   getCustomerByMeter: async (meterNumber: string) => {
     const response = await apiClient.get(`/customers/meter/${meterNumber}`);
@@ -36,7 +31,7 @@ export const customerApi = {
     return response.data;
   },
 
-  // Make payment (simulate M-Pesa)
+  // Make payment
   makePayment: async (billId: string, amount: number, phoneNumber: string) => {
     const response = await apiClient.post(`/billing/bills/${billId}/pay`, {
       amount,
@@ -51,6 +46,24 @@ export const customerApi = {
   // Get payment history
   getPaymentHistory: async (meterNumber: string) => {
     const response = await apiClient.get(`/payments?meter_number=${meterNumber}&limit=10`);
+    return response.data;
+  },
+
+  // Create new customer
+  create: async (customerData: any) => {
+    const response = await apiClient.post('/customers', customerData);
+    return response.data;
+  },
+
+  // Update customer
+  update: async (meterNumber: string, updates: any) => {
+    const response = await apiClient.put(`/customers/meter/${meterNumber}`, updates);
+    return response.data;
+  },
+
+  // Delete customer
+  delete: async (meterNumber: string) => {
+    const response = await apiClient.delete(`/customers/meter/${meterNumber}`);
     return response.data;
   }
 };

@@ -61,21 +61,36 @@ function CustomersContent() {
   }, []);
 
   const fetchCustomers = async () => {
-    try {
-      setLoading(true);
-      const response = await customerApi.getAll(1, 100);
-      if (response.success) {
-        setCustomers(response.data.customers || []);
+  try {
+    setLoading(true);
+    const response = await customerApi.getAll(1, 100);
+    console.log('📥 Customers API Response:', response);
+    
+    if (response.success) {
+      // Handle different response structures
+      let customersData = [];
+      
+      if (response.data && Array.isArray(response.data.customers)) {
+        customersData = response.data.customers;
+      } else if (response.data && Array.isArray(response.data)) {
+        customersData = response.data;
+      } else if (Array.isArray(response)) {
+        customersData = response;
       } else {
-        setError('Failed to load customers');
+        customersData = [];
       }
-    } catch (err) {
-      setError('Error connecting to server');
-      console.error(err);
-    } finally {
-      setLoading(false);
+      
+      setCustomers(customersData);
+    } else {
+      setError('Failed to load customers');
     }
-  };
+  } catch (err) {
+    setError('Error connecting to server');
+    console.error(err);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();

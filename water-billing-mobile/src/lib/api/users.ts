@@ -8,11 +8,11 @@ export interface CreateUserData {
   username: string;
   password: string;
   phone_number: string;
-  role: UserRole;  // ✅ Use the imported type
-  meter_number?: string;  // For customers (customer_service)
-  employee_id?: string;   // For staff
+  role: UserRole;
+  meter_number?: string;
+  employee_id?: string;
   department?: string;
-  assigned_zone?: string; // For readers
+  assigned_zone?: string;
 }
 
 export const userApi = {
@@ -44,14 +44,6 @@ export const userApi = {
   // Delete user
   deleteUser: async (id: string) => {
     const response = await apiClient.delete(`/users/${id}`);
-    return response.data;
-  },
-
-  // Change user password (admin)
-  changeUserPassword: async (id: string, newPassword: string) => {
-    const response = await apiClient.post(`/users/${id}/change-password`, {
-      password: newPassword
-    });
     return response.data;
   },
 

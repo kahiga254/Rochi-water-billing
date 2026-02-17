@@ -337,8 +337,8 @@ func (bs *BillingService) updateCustomerAfterBilling(sc mongo.SessionContext,
 		return fmt.Errorf("customer not found: %v", err)
 	}
 
-	// New balance = current balance - bill amount (since positive balance is credit)
-	newBalance := customer.Balance - billAmount
+	// ✅ FIXED: ADD bill amount to balance (they owe more)
+	newBalance := customer.Balance + billAmount
 	newBalance = utils.RoundToTwoDecimal(newBalance)
 
 	// Calculate total consumed
@@ -438,6 +438,86 @@ func (bs *BillingService) ProcessPayment(payment *models.Payment) error {
 	return err
 }
 
+// UpdateBillPayment updates a bill's payment status
+// UpdateBillPayment updates a bill's payment status and customer's balance
+func (s *BillingService) UpdateBillPayment(billID string, amount float64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	objectID, err := primitive.ObjectIDFromHex(billID)
+	if err != nil {
+		return fmt.Errorf("invalid bill ID: %v", err)
+	}
+
+	var bill models.Bill
+	err = s.billsCollection.FindOne(ctx, bson.M{"_id": objectID}).Decode(&bill)
+	if err != nil {
+		return fmt.Errorf("bill not found: %v", err)
+	}
+
+	// Calculate new amount paid and balance
+	newAmountPaid := bill.AmountPaid + amount
+	newBalance := bill.TotalAmount - newAmountPaid
+
+	// Determine new status
+	status := bill.Status
+	if newBalance <= 0 {
+		status = "paid"
+	} else if newAmountPaid > 0 {
+		status = "partially_paid"
+	}
+
+	// Update the bill
+	billUpdate := bson.M{
+		"$set": bson.M{
+			"amount_paid": newAmountPaid,
+			"balance":     newBalance,
+			"status":      status,
+			"updated_at":  time.Now(),
+		},
+	}
+
+	result, err := s.billsCollection.UpdateByID(ctx, objectID, billUpdate)
+	if err != nil {
+		return fmt.Errorf("failed to update bill: %v", err)
+	}
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("bill not found")
+	}
+
+	// ✅ NOW UPDATE THE CUSTOMER'S BALANCE
+	// Find the customer by meter number
+	var customer models.Customer
+	err = s.customersCollection.FindOne(ctx, bson.M{"meter_number": bill.MeterNumber}).Decode(&customer)
+	if err != nil {
+		// Log error but don't fail the payment
+		fmt.Printf("Warning: Customer not found for meter %s: %v\n", bill.MeterNumber, err)
+		return nil
+	}
+
+	// Calculate new customer balance (current balance - payment amount)
+	// Note: If positive balance means credit, adjust the formula accordingly
+	newCustomerBalance := customer.Balance - amount
+
+	// Update customer balance
+	customerUpdate := bson.M{
+		"$set": bson.M{
+			"balance":    newCustomerBalance,
+			"updated_at": time.Now(),
+			"total_paid": customer.TotalPaid + amount,
+		},
+	}
+
+	_, err = s.customersCollection.UpdateByID(ctx, customer.ID, customerUpdate)
+	if err != nil {
+		fmt.Printf("Warning: Failed to update customer balance for meter %s: %v\n", bill.MeterNumber, err)
+		// Don't fail the payment if customer update fails, just log it
+	}
+
+	return nil
+}
+
 // updateCustomerBalance updates customer's balance after payment
 func (bs *BillingService) updateCustomerBalance(sc mongo.SessionContext,
 	customerID primitive.ObjectID, paymentAmount float64) error {
@@ -450,7 +530,7 @@ func (bs *BillingService) updateCustomerBalance(sc mongo.SessionContext,
 	}
 
 	// Update balance (add payment to balance - since positive balance = credit)
-	newBalance := customer.Balance + paymentAmount
+	newBalance := customer.Balance - paymentAmount
 	newBalance = utils.RoundToTwoDecimal(newBalance)
 
 	update := bson.M{

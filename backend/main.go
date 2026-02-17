@@ -81,6 +81,7 @@ type Services struct {
 	User     *services.UserService
 	JWT      *services.JWTService
 	SMS      *services.SMSService
+	Payment  *services.PaymentService
 }
 
 func initializeServices(collections *Collections) *Services {
@@ -116,6 +117,7 @@ func initializeServices(collections *Collections) *Services {
 
 	// User Service
 	userService := services.NewUserService(collections.Users)
+	paymentService := services.NewPaymentService(collections.Payments)
 
 	return &Services{
 		Customer: customerService,
@@ -123,6 +125,7 @@ func initializeServices(collections *Collections) *Services {
 		User:     userService,
 		JWT:      jwtService,
 		SMS:      smsService,
+		Payment:  paymentService,
 	}
 }
 
@@ -133,6 +136,7 @@ type Handlers struct {
 	SMS       *handlers.SMSHandler
 	Dashboard *handlers.DashboardHandler
 	Auth      *handlers.AuthHandler
+	Payment   *handlers.PaymentHandler
 }
 
 func initializeHandlers(svc *Services) *Handlers {
@@ -143,6 +147,7 @@ func initializeHandlers(svc *Services) *Handlers {
 		SMS:       handlers.NewSMSHandler(svc.Billing, svc.SMS),
 		Dashboard: handlers.NewDashboardHandler(svc.Billing, svc.Customer),
 		Auth:      handlers.NewAuthHandler(svc.User, svc.JWT),
+		Payment:   handlers.NewPaymentHandler(svc.Payment, svc.Billing),
 	}
 }
 
@@ -211,6 +216,13 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 
 				// Summary and reports
 				billing.GET("/summary", middleware.RoleMiddleware("admin", "manager"), h.Billing.GetBillingSummary)
+			}
+
+			// Payment routes
+			payments := protected.Group("/payments")
+			{
+				payments.GET("", middleware.RoleMiddleware("admin", "customer_service"), h.Payment.GetPaymentsByMeter)
+				payments.POST("", middleware.RoleMiddleware("admin", "cashier"), h.Payment.RecordPayment)
 			}
 
 			// SMS routes

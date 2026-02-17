@@ -116,6 +116,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		IsActive:    user.IsActive,
 		LastLogin:   user.LastLogin,
 		CreatedAt:   user.CreatedAt,
+		MeterNumber: user.MeterNumber,
 	}
 
 	response := gin.H{
@@ -140,14 +141,8 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Failure 500 {object} Response "Internal server error"
 // @Router /auth/register [post]
 // Register handles new user registration
+// Register handles new user registration (admin only)
 func (h *AuthHandler) Register(c *gin.Context) {
-	// Check if user is admin (from JWT middleware)
-	userRole, exists := c.Get("userRole")
-	if !exists || userRole != "admin" {
-		Forbidden(c, "Only administrators can register new users")
-		return
-	}
-
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		BadRequest(c, "Invalid registration data", err)
@@ -175,10 +170,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	if req.Role == "" {
-		req.Role = "reader" // Default role
-	}
-
 	// Validate role
 	validRoles := map[string]bool{
 		"admin":            true,
@@ -194,7 +185,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	// Create user model
-	now := time.Now()
 	user := &models.User{
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
@@ -205,9 +195,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		EmployeeID:   req.EmployeeID,
 		Department:   req.Department,
 		AssignedZone: req.Zone,
+		MeterNumber:  req.MeterNumber, // ✅ Make sure this is included
 		IsActive:     true,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	// Create user
@@ -222,7 +213,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	// ✅ FIXED: Return ALL user fields
+	// Return user without password
 	userResponse := UserResponse{
 		ID:          user.ID.Hex(),
 		FirstName:   user.FirstName,
@@ -231,12 +222,9 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Username:    user.Username,
 		PhoneNumber: user.PhoneNumber,
 		Role:        user.Role,
-		EmployeeID:  user.EmployeeID,
-		Department:  user.Department,
-		Zone:        user.AssignedZone,
+		MeterNumber: user.MeterNumber, // ✅ Include this
 		IsActive:    user.IsActive,
 		CreatedAt:   user.CreatedAt,
-		LastLogin:   user.LastLogin,
 	}
 
 	CreatedResponse(c, "User registered successfully", userResponse)
@@ -280,6 +268,7 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 		IsActive:    user.IsActive,
 		LastLogin:   user.LastLogin,
 		CreatedAt:   user.CreatedAt,
+		MeterNumber: user.MeterNumber,
 	}
 
 	SuccessResponse(c, "Profile retrieved", userResponse)
@@ -510,6 +499,7 @@ type RegisterRequest struct {
 	EmployeeID  string `json:"employee_id,omitempty"`
 	Department  string `json:"department,omitempty"`
 	Zone        string `json:"zone,omitempty"`
+	MeterNumber string `json:"meter_number,omitempty"`
 }
 
 type UpdateProfileRequest struct {
@@ -543,4 +533,5 @@ type UserResponse struct {
 	IsActive    bool       `json:"is_active"`
 	LastLogin   *time.Time `json:"last_login,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
+	MeterNumber string     `json:"meter_number,omitempty"`
 }
