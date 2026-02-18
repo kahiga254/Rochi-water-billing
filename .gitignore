@@ -1,26 +1,53 @@
-# Dependencies
-water-billing-mobile/node_modules/
-water-billing-mobile/package-lock.json
+# Environment files (IMPORTANT - never commit these!)
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+backend/.env
+*.env
 
-# Build outputs
+# Dependencies (NEVER commit these!)
+node_modules/
+water-billing-mobile/node_modules/
+backend/vendor/
+backend/node_modules/
+
+# Build outputs (NEVER commit these!)
 water-billing-mobile/.next/
 water-billing-mobile/out/
 water-billing-mobile/build/
 water-billing-mobile/dist/
-
-# Environment
-.env
-.env.local
-.env.development.local
+backend/build/
+backend/dist/
 
 # Logs
 *.log
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# IDE
+# IDE files
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+
+# Binary files (these cause GitHub errors)
+*.exe
+*.dll
+*.so
+*.dylib
+*.bin
+*.node
+
+# Large cache files
+.cache/
+*.cache
+*.sst
