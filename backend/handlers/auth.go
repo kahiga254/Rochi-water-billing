@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -272,6 +273,102 @@ func (h *AuthHandler) GetProfile(c *gin.Context) {
 	}
 
 	SuccessResponse(c, "Profile retrieved", userResponse)
+}
+
+// Add to handlers/auth.go - inside the AuthHandler struct
+
+// DeleteUser handles user deletion
+// @Summary Delete a user
+// @Description Delete a user by ID (admin only)
+// @Tags Users
+// @Accept json
+// @Produce json
+// @Param id path string true "User ID"
+// @Success 200 {object} Response "User deleted successfully"
+// @Failure 400 {object} Response "Invalid user ID"
+// @Failure 404 {object} Response "User not found"
+// @Failure 500 {object} Response "Internal server error"
+// @Router /users/{id} [delete]
+func (h *AuthHandler) DeleteUser(c *gin.Context) {
+	id := c.Param("id")
+	if id == "" {
+		BadRequest(c, "User ID is required", nil)
+		return
+	}
+
+	_, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		BadRequest(c, "Invalid user ID format", err)
+		return
+	}
+
+	if err := h.userService.DeleteUser(id); err != nil {
+		if err.Error() == "user not found" {
+			NotFound(c, "User not found")
+		} else {
+			InternalServerError(c, "Failed to delete user", err)
+		}
+		return
+	}
+
+	SuccessResponse(c, "User deleted successfully", nil)
+}
+
+// ToggleUserStatus handles user activation/deactivation
+// @Summary Toggle user status
+// @Description Activate or deactivate a user (admin only)
+// @Tags Users
+// @Accept json
+// @Produce json
+// @Param id path string true "User ID"
+// @Param request body ToggleStatusRequest true "Status update"
+// @Success 200 {object} Response "User status updated"
+// @Failure 400 {object} Response "Invalid input"
+// @Failure 404 {object} Response "User not found"
+// @Failure 500 {object} Response "Internal server error"
+// @Router /users/{id}/status [patch]
+func (h *AuthHandler) ToggleUserStatus(c *gin.Context) {
+	// Get ID from URL parameter
+	id := c.Param("id")
+	if id == "" {
+		BadRequest(c, "User ID is required", nil)
+		return
+	}
+
+	// Parse request body
+	var req ToggleStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		BadRequest(c, "Invalid request body", err)
+		return
+	}
+
+	// CONVERT string ID to ObjectID (THIS WAS MISSING)
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		BadRequest(c, "Invalid user ID format", err)
+		return
+	}
+
+	// Pass ObjectID to service
+	if err := h.userService.ToggleUserStatus(objectID, req.IsActive); err != nil {
+		if err.Error() == "user not found" {
+			NotFound(c, "User not found")
+		} else {
+			InternalServerError(c, "Failed to update user status", err)
+		}
+		return
+	}
+
+	status := "activated"
+	if !req.IsActive {
+		status = "deactivated"
+	}
+	SuccessResponse(c, "User "+status+" successfully", nil)
+}
+
+// Add this type at the bottom of the file
+type ToggleStatusRequest struct {
+	IsActive bool `json:"IsActive" `
 }
 
 // UpdateProfile updates current user profile

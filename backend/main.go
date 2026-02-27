@@ -194,6 +194,7 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 				customers.PUT("/meter/:meterNumber/status", middleware.RoleMiddleware("admin", "manager"), h.Customer.UpdateCustomerStatus)
 				customers.GET("/statistics", middleware.RoleMiddleware("admin", "manager"), h.Customer.GetCustomerStatistics)
 				customers.POST("/bulk", middleware.RoleMiddleware("admin"), h.Customer.BulkCreateCustomers)
+				customers.DELETE("/meter/:meterNumber", middleware.RoleMiddleware("admin"), h.Customer.DeleteCustomer)
 			}
 
 			// Billing routes
@@ -206,13 +207,15 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 				// Customer billing info
 				billing.GET("/customers/:meterNumber/bills", h.Billing.GetCustomerBills)
 				billing.GET("/customers/:meterNumber/readings", h.Billing.GetCustomerReadingHistory)
-
+				billing.GET("/bills/:id", middleware.RoleMiddleware("admin", "manager", "cashier"), h.Billing.GetBillByID)
+				billing.GET("/bills", middleware.RoleMiddleware("admin", "manager"), h.Billing.GetAllBills)
 				// Bill management
 				billing.GET("/bills/overdue", middleware.RoleMiddleware("admin", "manager", "cashier"), h.Billing.GetOverdueBills)
 				billing.GET("/bills/unpaid", middleware.RoleMiddleware("admin", "manager", "cashier"), h.Billing.GetUnpaidBills)
 				billing.POST("/bills/:billID/pay", middleware.RoleMiddleware("admin", "cashier"), h.Billing.ProcessPayment)
 				// ✅ Added my-readings endpoint
 				billing.GET("/readings/my-readings", middleware.RoleMiddleware("reader"), h.Billing.GetMyReadings)
+				// In main.go - add this to your billing routes
 
 				// Summary and reports
 				billing.GET("/summary", middleware.RoleMiddleware("admin", "manager"), h.Billing.GetBillingSummary)
@@ -234,6 +237,7 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 				sms.POST("/payments/confirm", h.SMS.SendPaymentConfirmation)
 				sms.POST("/disconnection-warnings", h.SMS.SendDisconnectionWarning)
 				sms.GET("/logs", h.SMS.GetSMSLogs)
+				sms.POST("/overdue-reminders", h.SMS.SendOverdueReminders)
 			}
 
 			// Dashboard routes
@@ -251,6 +255,8 @@ func setupRouter(h *Handlers, jwtService *services.JWTService) *gin.Engine {
 			{
 				users.POST("", h.Auth.Register)
 				users.GET("", h.Auth.GetUsers)
+				users.DELETE("/:id", h.Auth.DeleteUser)
+				users.PATCH("/:id/status", h.Auth.ToggleUserStatus)
 			}
 
 			// Profile routes (authenticated users)

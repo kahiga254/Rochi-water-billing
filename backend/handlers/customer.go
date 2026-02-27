@@ -441,6 +441,44 @@ func (h *CustomerHandler) GetCustomers(c *gin.Context) {
 	})
 }
 
+// DeleteCustomer handles customer deletion
+// @Summary Delete a customer
+// @Description Delete a customer by meter number
+// @Tags Customers
+// @Accept json
+// @Produce json
+// @Param meterNumber path string true "Meter Number"
+// @Success 200 {object} Response "Customer deleted successfully"
+// @Failure 400 {object} Response "Invalid meter number"
+// @Failure 404 {object} Response "Customer not found"
+// @Failure 500 {object} Response "Internal server error"
+// @Router /customers/meter/{meterNumber} [delete]
+func (h *CustomerHandler) DeleteCustomer(c *gin.Context) {
+	meterNumber := c.Param("meterNumber")
+	if meterNumber == "" {
+		BadRequest(c, "Meter number is required", nil)
+		return
+	}
+
+	// Optional: Add confirmation check
+	// You could require a query parameter like ?confirm=true
+	if c.Query("confirm") != "true" {
+		BadRequest(c, "Please confirm deletion with ?confirm=true", nil)
+		return
+	}
+
+	if err := h.customerService.DeleteCustomer(meterNumber); err != nil {
+		if err.Error() == "customer with meter number "+meterNumber+" not found" {
+			NotFound(c, "Customer not found")
+		} else {
+			InternalServerError(c, "Failed to delete customer", err)
+		}
+		return
+	}
+
+	SuccessResponse(c, "Customer deleted successfully", nil)
+}
+
 // UpdateStatusRequest represents status update request
 type UpdateStatusRequest struct {
 	Status string `json:"status" binding:"required"`

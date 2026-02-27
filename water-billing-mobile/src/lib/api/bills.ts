@@ -3,13 +3,20 @@ import apiClient from './client';
 export const billsApi = {
   // Get all bills with pagination
   getAll: async (page = 1, limit = 20, status?: string) => {
-    let url = `/billing/bills/unpaid?page=${page}&limit=${limit}`;
+    let url = `/billing/bills?page=${page}&limit=${limit}`;
     if (status && status !== 'all') {
       url += `&status=${status}`;
     }
     const response = await apiClient.get(url);
     return response.data;
   },
+
+  getUnpaid: async (page = 1, limit = 20) => {
+    const response = await apiClient.get(`/billing/bills/unpaid?page=${page}&limit=${limit}`);
+    return response.data;
+  },
+
+
 
   // Get bill by ID
   getById: async (id: string) => {

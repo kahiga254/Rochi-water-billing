@@ -76,22 +76,17 @@ function CustomerDashboard() {
     try {
       setLoading(true);
       setError(null);
-      console.log('🚀 Fetching data for meter:', meterNumber);
       
       // Fetch customer details
       const customerRes = await customerApi.getCustomerByMeter(meterNumber);
-      console.log('📥 Customer API Response:', customerRes);
       
       if (customerRes && customerRes.success) {
         setCustomer(customerRes.data);
-        console.log('✅ Customer data set:', customerRes.data);
       } else {
-        console.warn('❌ Customer fetch failed:', customerRes?.message);
       }
 
       // Fetch bills
       const billsRes = await customerApi.getBills(meterNumber);
-      console.log('📥 Bills API Response:', billsRes);
       
       if (billsRes && billsRes.success) {
         let billsData: Bill[] = [];
@@ -105,17 +100,14 @@ function CustomerDashboard() {
         }
         
         setBills(billsData);
-        console.log('✅ Bills data set:', billsData);
         
         // Find current pending bill
         const pending = billsData.find((b: Bill) => b.status === 'pending' || b.status === 'overdue');
         setCurrentBill(pending || null);
-        console.log('💰 Current pending bill:', pending);
       }
 
       // Fetch reading history
       const readingsRes = await customerApi.getReadingHistory(meterNumber);
-      console.log('📥 Readings API Response:', readingsRes);
       
       if (readingsRes && readingsRes.success) {
         let readingsData: Reading[] = [];
@@ -129,11 +121,9 @@ function CustomerDashboard() {
         }
         
         setReadings(readingsData);
-        console.log('✅ Readings data set:', readingsData);
       }
 
     } catch (error) {
-      console.error('💥 Error in fetchCustomerData:', error);
       setError('Failed to load dashboard data. Please try again.');
       toast.error('Failed to load dashboard data');
     } finally {

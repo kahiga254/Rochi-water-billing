@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { 
   FileText, 
@@ -36,7 +37,15 @@ interface Bill {
   consumption: number;
 }
 
+interface SummaryData {
+  totalAmount: number;
+  pendingAmount: number;
+  overdueAmount: number;
+  paidAmount: number;
+}
+
 function BillsContent() {
+  const router = useRouter();
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -55,15 +64,72 @@ function BillsContent() {
     fetchSummary();
   }, [page, statusFilter]);
 
+    const handleViewDetails = (billId: string) => {
+    router.push(`/bills/${billId}`);
+  };
+
+     const handleSendReminder = async (bill: Bill) => {
+    if (!confirm(`Send payment reminder for bill ${bill.bill_number} to ${bill.customer_name}?`)) {
+      return;
+    }
+    
+    try {
+      const response = await billsApi.sendNotification(bill.id);
+      if (response.success) {
+        toast.success(`Reminder sent to ${bill.customer_name}`);
+      } else {
+        toast.error(response.message || 'Failed to send reminder');
+      }
+    } catch (error: any) {
+      console.error('Send reminder error:', error);
+      toast.error(error.response?.data?.message || 'Failed to send reminder');
+    }
+  };
+
   const fetchBills = async () => {
     try {
       setLoading(true);
       const response = await billsApi.getAll(page, 20, statusFilter);
+
       if (response.success) {
-        setBills(response.data || []);
-        // Assuming your API returns pagination info
-        setTotalPages(response.total_pages || 1);
+
+        let billsData: Bill[] = [];
+
+        if (response.data && Array.isArray(response.data.bills)) {
+        billsData = response.data.bills;
+      } else if (Array.isArray(response.data)) {
+        billsData = response.data;
+      } else {
+        billsData = [];
       }
+
+        setBills(billsData);
+        setTotalPages(response.data?.total_pages || response.total_pages || 1);
+
+        //calculate summary from All bills
+        const summaryData = billsData.reduce((acc, bill) => {
+        acc.totalAmount += bill.total_amount;
+        
+        if (bill.status === 'pending') {
+          acc.pendingAmount += bill.balance;
+        } else if (bill.status === 'overdue') {
+          acc.overdueAmount += bill.balance;
+        } else if (bill.status === 'paid') {
+          acc.paidAmount += bill.total_amount;
+        }
+
+        return acc;
+      }, {
+        totalAmount: 0,
+        pendingAmount: 0,
+        overdueAmount: 0,
+        paidAmount: 0
+
+      });
+
+      setSummary(summaryData);
+    }
+
     } catch (error) {
       toast.error('Failed to load bills');
     } finally {
@@ -298,7 +364,7 @@ function BillsContent() {
                     <td className="px-6 py-4">{getStatusBadge(bill.status)}</td>
                     <td className="px-6 py-4 text-right">
                       <button
-                        onClick={() => window.location.href = `/bills/${bill.id}`}
+                        onClick={() => handleViewDetails (bill.id)}
                         className="text-blue-600 hover:text-blue-900 mr-3"
                         title="View Details"
                       >
@@ -306,7 +372,7 @@ function BillsContent() {
                       </button>
                       {bill.status !== 'paid' && (
                         <button
-                          onClick={() => handleSendNotification(bill.id)}
+                          onClick={() => handleSendReminder(bill)}
                           className="text-green-600 hover:text-green-900"
                           title="Send Reminder"
                         >

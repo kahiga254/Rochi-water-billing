@@ -15,12 +15,14 @@ import (
 )
 
 type UserService struct {
-	collection *mongo.Collection // ✅ THIS MUST BE HERE
+	collection      *mongo.Collection // ✅ THIS MUST BE HERE
+	usersCollection *mongo.Collection
 }
 
 func NewUserService(collection *mongo.Collection) *UserService {
 	return &UserService{
-		collection: collection, // ✅ Initialize the collection
+		collection:      collection, // ✅ Initialize the collection
+		usersCollection: collection,
 	}
 }
 
@@ -295,6 +297,30 @@ func (s *UserService) DeleteUser(id string) error {
 	}
 
 	if result.DeletedCount == 0 {
+		return fmt.Errorf("user not found")
+	}
+
+	return nil
+}
+
+// ToggleUserStatus activates or deactivates a user
+func (us *UserService) ToggleUserStatus(id primitive.ObjectID, isActive bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	update := bson.M{
+		"$set": bson.M{
+			"is_active":  isActive,
+			"updated_at": time.Now(),
+		},
+	}
+
+	result, err := us.usersCollection.UpdateOne(ctx, bson.M{"_id": id}, update)
+	if err != nil {
+		return fmt.Errorf("failed to update user status: %v", err)
+	}
+
+	if result.MatchedCount == 0 {
 		return fmt.Errorf("user not found")
 	}
 

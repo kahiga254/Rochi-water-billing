@@ -224,6 +224,49 @@ func (h *BillingHandler) ProcessPayment(c *gin.Context) {
 	SuccessResponse(c, "Payment processed successfully", payment)
 }
 
+// In handlers/billing.go
+
+// GetBillByID retrieves a bill by its ID
+// @Summary Get bill by ID
+// @Description Get detailed bill information by bill ID
+// @Tags Billing
+// @Accept json
+// @Produce json
+// @Param id path string true "Bill ID"
+// @Success 200 {object} Response "Bill found"
+// @Failure 400 {object} Response "Invalid bill ID"
+// @Failure 404 {object} Response "Bill not found"
+// @Failure 500 {object} Response "Internal server error"
+// @Router /billing/bills/{id} [get]
+func (h *BillingHandler) GetBillByID(c *gin.Context) {
+	billID := c.Param("id")
+	if billID == "" {
+		BadRequest(c, "Bill ID is required", nil)
+		return
+	}
+
+	// Convert string ID to ObjectID
+	objectID, err := primitive.ObjectIDFromHex(billID)
+	if err != nil {
+		BadRequest(c, "Invalid bill ID format", err)
+		return
+	}
+
+	// Get bill from service
+	bill, err := h.billingService.GetBillByID(objectID)
+	if err != nil {
+		InternalServerError(c, "Failed to fetch bill", err)
+		return
+	}
+
+	if bill == nil {
+		NotFound(c, "Bill not found")
+		return
+	}
+
+	SuccessResponse(c, "Bill found", bill)
+}
+
 // GetBillDetails gets details of a specific bill
 func (h *BillingHandler) GetBillDetails(c *gin.Context) {
 	// This would query the bills collection directly
@@ -413,6 +456,52 @@ func (h *BillingHandler) BulkSubmitReadings(c *gin.Context) {
 	}
 
 	CreatedResponse(c, "Bulk readings processed", response)
+}
+
+// GetAllBills returns all bills with pagination
+// @Summary Get all bills
+// @Description Get all bills with pagination and optional status filter
+// @Tags Billing
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(20)
+// @Param status query string false "Filter by status (paid, pending, overdue)"
+// @Success 200 {object} Response "Bills retrieved successfully"
+// @Failure 500 {object} Response "Internal server error"
+// @Router /billing/bills [get]
+func (h *BillingHandler) GetAllBills(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	status := c.Query("status")
+
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	// Call service method to get all bills
+	bills, total, err := h.billingService.GetAllBills(c.Request.Context(), page, limit, status)
+	if err != nil {
+		InternalServerError(c, "Failed to fetch bills", err)
+		return
+	}
+
+	// Calculate total pages
+	totalPages := int64(0)
+	if limit > 0 {
+		totalPages = (total + int64(limit) - 1) / int64(limit)
+	}
+
+	SuccessResponse(c, "Bills retrieved successfully", gin.H{
+		"bills":       bills,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"total_pages": totalPages,
+	})
 }
 
 // Request/Response DTOs

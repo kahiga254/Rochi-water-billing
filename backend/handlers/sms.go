@@ -30,6 +30,8 @@ func NewSMSHandler(billingService *services.BillingService, smsService *services
 }
 
 // SendBillNotification sends SMS notification for a specific bill
+// SendBillNotification sends SMS notification for a specific bill
+// SendBillNotification sends SMS notification for a specific bill
 func (h *SMSHandler) SendBillNotification(c *gin.Context) {
 	billID := c.Param("billID")
 	if billID == "" {
@@ -37,14 +39,63 @@ func (h *SMSHandler) SendBillNotification(c *gin.Context) {
 		return
 	}
 
-	_, err := primitive.ObjectIDFromHex(billID)
+	objectID, err := primitive.ObjectIDFromHex(billID)
 	if err != nil {
-		BadRequest(c, "Invalid bill ID", err)
+		BadRequest(c, "Invalid bill ID format", err)
 		return
 	}
 
-	// SMS service is not implemented yet
-	notImplemented(c, "SMS service is not yet implemented. Configure Twilio or Africa's Talking in .env file.")
+	// Get bill details
+	bill, err := h.billingService.GetBillByID(objectID)
+	if err != nil {
+		InternalServerError(c, "Failed to fetch bill", err)
+		return
+	}
+	if bill == nil {
+		NotFound(c, "Bill not found")
+		return
+	}
+
+	// Get customer details
+	customer, err := h.billingService.GetCustomerByMeterNumber(bill.MeterNumber)
+	if err != nil {
+		InternalServerError(c, "Failed to fetch customer", err)
+		return
+	}
+	if customer == nil {
+		NotFound(c, "Customer not found")
+		return
+	}
+
+	// Check if customer has phone number
+	if customer.PhoneNumber == "" {
+		BadRequest(c, "Customer has no phone number", nil)
+		return
+	}
+
+	// Use the service's SendBillNotification method
+	err = h.smsService.SendBillNotification(bill, customer)
+	if err != nil {
+		InternalServerError(c, "Failed to send SMS", err)
+		return
+	}
+
+	// Check if we're in mock mode
+	mode := "live"
+	if !h.smsService.IsEnabled() {
+		mode = "mock (SMS not configured)"
+	}
+
+	SuccessResponse(c, "Bill notification sent successfully", gin.H{
+		"bill_id":       billID,
+		"bill_number":   bill.BillNumber,
+		"meter_number":  customer.MeterNumber,
+		"customer_name": customer.FullName(),
+		"phone":         customer.PhoneNumber,
+		"status":        bill.Status,
+		"amount":        bill.Balance,
+		"mode":          mode,
+	})
 }
 
 // BulkSendBillNotifications sends SMS notifications for multiple bills
@@ -207,6 +258,16 @@ func (h *SMSHandler) SendDisconnectionWarning(c *gin.Context) {
 	}
 
 	SuccessResponse(c, "Disconnection warning endpoint ready", response)
+}
+
+// SendOverdueReminders triggers SMS reminders for overdue bills
+func (h *SMSHandler) SendOverdueReminders(c *gin.Context) {
+	// This could be called manually by admin or via a cron job
+	go h.billingService.SendOverdueReminders()
+
+	SuccessResponse(c, "Overdue reminders triggered successfully", gin.H{
+		"message": "Reminders are being sent in the background",
+	})
 }
 
 // Request/Response DTOs

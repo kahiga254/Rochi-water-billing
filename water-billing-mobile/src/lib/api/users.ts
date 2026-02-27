@@ -47,11 +47,16 @@ export const userApi = {
     return response.data;
   },
 
-  // Toggle user active status
-  toggleUserStatus: async (id: string, isActive: boolean) => {
-    const response = await apiClient.patch(`/users/${id}/status`, {
-      is_active: isActive
-    });
-    return response.data;
+    toggleUserStatus: async (id: string, isActive: boolean) => {
+    const payload = { IsActive: isActive };
+  
+    
+    try {
+      const response = await apiClient.patch(`/users/${id}/status`, payload);
+      return response.data;
+    } catch (error: any) {
+      
+      throw error;
+    }
   }
 };

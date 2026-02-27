@@ -211,6 +211,7 @@ func (bs *BillingService) SubmitMeterReading(readingRequest *models.MeterReading
 }
 
 // NEW: Send bill SMS notification
+// sendBillSMSNotification sends an SMS to the customer with bill details
 func (bs *BillingService) sendBillSMSNotification(bill *models.Bill, customer *models.Customer) {
 	// Small delay to ensure bill is fully saved
 	time.Sleep(200 * time.Millisecond)
@@ -224,27 +225,32 @@ func (bs *BillingService) sendBillSMSNotification(bill *models.Bill, customer *m
 	// Format due date
 	dueDate := bill.DueDate.Format("02 Jan 2006")
 
-	// Format the SMS message exactly as you requested
+	// Calculate amount in KSh
+	amount := bill.TotalAmount
+
+	// Format the SMS message
 	message := fmt.Sprintf(`Dear %s,
 
-Your %s water bill is KSh %.0f
+Your water bill for %s is now ready.
 
-Previous reading: %.1f units
-Current reading: %.1f units
-Consumption: %.1f units × KSh 100 = KSh %.0f
+Meter: %s
+Previous Reading: %.1f units
+Current Reading: %.1f units
+Consumption: %.1f units
+Amount Due: KSh %.0f
+Due Date: %s
 
-Please make your payment of KSh %.0f by %s for smooth running of our services.
+Please make payment to avoid service interruption.
 
 Thank you,
-Water Billing System`,
+Rochi Pure Water`,
 		customer.FullName(),
 		month,
-		bill.TotalAmount,
+		bill.MeterNumber,
 		bill.PreviousReading,
 		bill.CurrentReading,
 		bill.Consumption,
-		bill.WaterCharge,
-		bill.TotalAmount,
+		amount,
 		dueDate)
 
 	// Send the SMS
@@ -438,7 +444,6 @@ func (bs *BillingService) ProcessPayment(payment *models.Payment) error {
 	return err
 }
 
-// UpdateBillPayment updates a bill's payment status
 // UpdateBillPayment updates a bill's payment status and customer's balance
 func (s *BillingService) UpdateBillPayment(billID string, amount float64) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -496,9 +501,22 @@ func (s *BillingService) UpdateBillPayment(billID string, amount float64) error 
 		return nil
 	}
 
-	// Calculate new customer balance (current balance - payment amount)
-	// Note: If positive balance means credit, adjust the formula accordingly
-	newCustomerBalance := customer.Balance - amount
+	// ✅ FIXED: Calculate new customer balance based on credit/debt status
+	var newCustomerBalance float64
+
+	if customer.Balance < 0 {
+		// Customer has CREDIT (negative balance)
+		// They are using credit to pay - balance should INCREASE (toward zero)
+		newCustomerBalance = customer.Balance + amount
+		log.Printf("Credit payment: Balance was %.2f, payment %.2f, new balance %.2f",
+			customer.Balance, amount, newCustomerBalance)
+	} else {
+		// Customer has DEBT (positive balance)
+		// They are paying down debt - balance should DECREASE
+		newCustomerBalance = customer.Balance - amount
+	}
+
+	newCustomerBalance = utils.RoundToTwoDecimal(newCustomerBalance)
 
 	// Update customer balance
 	customerUpdate := bson.M{
@@ -529,8 +547,17 @@ func (bs *BillingService) updateCustomerBalance(sc mongo.SessionContext,
 		return fmt.Errorf("customer not found: %v", err)
 	}
 
-	// Update balance (add payment to balance - since positive balance = credit)
-	newBalance := customer.Balance - paymentAmount
+	// ✅ FIXED: Calculate new balance based on credit/debt status
+	var newBalance float64
+
+	if customer.Balance < 0 {
+		// Customer has CREDIT - using credit increases balance (toward zero)
+		newBalance = customer.Balance + paymentAmount
+	} else {
+		// Customer has DEBT - paying reduces balance
+		newBalance = customer.Balance - paymentAmount
+	}
+
 	newBalance = utils.RoundToTwoDecimal(newBalance)
 
 	update := bson.M{
@@ -755,6 +782,166 @@ func (bs *BillingService) GetBillingSummary(startDate, endDate time.Time) (*Bill
 	}
 
 	return summary, nil
+}
+
+// GetBillByID retrieves a bill by its ID
+func (bs *BillingService) GetBillByID(id primitive.ObjectID) (*models.Bill, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var bill models.Bill
+	err := bs.billsCollection.FindOne(ctx, bson.M{"_id": id}).Decode(&bill)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("error fetching bill: %v", err)
+	}
+
+	return &bill, nil
+}
+
+// GetAllBills returns all bills with pagination and optional status filter
+func (bs *BillingService) GetAllBills(ctx context.Context, page, limit int, status string) ([]models.Bill, int64, error) {
+	// Build filter
+	filter := bson.M{}
+	if status != "" && status != "all" {
+		filter["status"] = status
+	}
+
+	// Get total count
+	total, err := bs.billsCollection.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error counting bills: %v", err)
+	}
+
+	// Calculate skip for pagination
+	skip := (page - 1) * limit
+
+	// Set options with pagination and sorting
+	opts := options.Find().
+		SetSkip(int64(skip)).
+		SetLimit(int64(limit)).
+		SetSort(bson.M{"due_date": -1}) // Sort by due date, newest first
+
+	// Execute query
+	cursor, err := bs.billsCollection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error fetching bills: %v", err)
+	}
+	defer cursor.Close(ctx)
+
+	// Decode results
+	var bills []models.Bill
+	if err = cursor.All(ctx, &bills); err != nil {
+		return nil, 0, fmt.Errorf("error decoding bills: %v", err)
+	}
+
+	return bills, total, nil
+}
+
+// sendPaymentSMS sends an SMS confirmation when payment is received
+func (bs *BillingService) sendPaymentSMS(payment *models.Payment, customer *models.Customer, bill *models.Bill) {
+
+	// Format payment date
+	paymentDate := payment.PaymentDate.Format("02 Jan 2006")
+
+	// Format the SMS message
+	message := fmt.Sprintf(`Dear %s,
+
+Thank you for your payment!
+
+Amount: KSh %.0f
+Payment Date: %s
+Method: %s
+Receipt: %s
+Bill Period: %s
+Remaining Balance: KSh %.0f
+
+Thank you for choosing Rochi Pure Water.`,
+		customer.FullName(),
+		payment.Amount,
+		paymentDate,
+		payment.PaymentMethod,
+		payment.ReceiptNumber,
+		bill.BillingPeriod,
+		bill.Balance)
+
+	// Send the SMS
+	log.Printf("📱 Sending payment confirmation SMS to %s (%s)", customer.FullName(), customer.PhoneNumber)
+	err := bs.smsService.SendSMS(customer.PhoneNumber, message)
+
+	if err != nil {
+		log.Printf("❌ Failed to send payment SMS to %s: %v", customer.PhoneNumber, err)
+	} else {
+		log.Printf("✅ Payment confirmation SMS sent to %s", customer.FullName())
+	}
+}
+
+// SendOverdueReminders sends SMS reminders to customers with overdue bills
+func (bs *BillingService) SendOverdueReminders() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Find all overdue bills
+	filter := bson.M{
+		"status":  "overdue",
+		"balance": bson.M{"$gt": 0},
+	}
+
+	cursor, err := bs.billsCollection.Find(ctx, filter)
+	if err != nil {
+		log.Printf("Error finding overdue bills: %v", err)
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var bills []models.Bill
+	if err = cursor.All(ctx, &bills); err != nil {
+		log.Printf("Error decoding overdue bills: %v", err)
+		return
+	}
+
+	for _, bill := range bills {
+		// Get customer details
+		var customer models.Customer
+		err = bs.customersCollection.FindOne(ctx, bson.M{"_id": bill.CustomerID}).Decode(&customer)
+		if err != nil || customer.PhoneNumber == "" {
+			continue
+		}
+
+		// Send reminder SMS asynchronously
+		go bs.sendOverdueReminder(&bill, &customer)
+	}
+}
+
+// sendOverdueReminder sends an overdue reminder SMS
+func (bs *BillingService) sendOverdueReminder(bill *models.Bill, customer *models.Customer) {
+	dueDate := bill.DueDate.Format("02 Jan 2006")
+
+	message := fmt.Sprintf(`Dear %s,
+
+This is a reminder that your water bill is OVERDUE.
+
+Bill Period: %s
+Amount Due: KSh %.0f
+Original Due Date: %s
+
+Please make immediate payment to avoid service disconnection.
+
+Thank you,
+Rochi Pure Water`,
+		customer.FullName(),
+		bill.BillingPeriod,
+		bill.Balance,
+		dueDate)
+
+	err := bs.smsService.SendSMS(customer.PhoneNumber, message)
+	if err != nil {
+		log.Printf("Failed to send overdue reminder to %s: %v", customer.PhoneNumber, err)
+	} else {
+		log.Printf("✅ Overdue reminder sent to %s", customer.FullName())
+	}
 }
 
 // BillingSummary represents billing summary data

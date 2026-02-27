@@ -2,7 +2,7 @@
 
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { useState, useEffect } from 'react';
-import { Search, Edit, Trash2, UserPlus, X } from 'lucide-react';
+import { Search, Edit, Trash2, UserPlus, X, Save } from 'lucide-react';
 import { customerApi } from '@/lib/api/customer';
 import { toast } from 'sonner';
 
@@ -33,15 +33,40 @@ interface NewCustomer {
   };
 }
 
+// For edit functionality - reuse the same structure but make fields optional
+interface EditCustomer extends Partial<NewCustomer> {
+  id: string;
+}
+
 function CustomersContent() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   
   const [newCustomer, setNewCustomer] = useState<NewCustomer>({
+    meter_number: '',
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone_number: '',
+    zone: '',
+    address: {
+      street_address: '',
+      city: '',
+      postal_code: '',
+      country: 'Kenya'
+    }
+  });
+
+  const [editCustomer, setEditCustomer] = useState<EditCustomer>({
+    id: '',
     meter_number: '',
     first_name: '',
     last_name: '',
@@ -61,36 +86,35 @@ function CustomersContent() {
   }, []);
 
   const fetchCustomers = async () => {
-  try {
-    setLoading(true);
-    const response = await customerApi.getAll(1, 100);
-    console.log('📥 Customers API Response:', response);
-    
-    if (response.success) {
-      // Handle different response structures
-      let customersData = [];
+    try {
+      setLoading(true);
+      const response = await customerApi.getAll(1, 100);
+      console.log('📥 Customers API Response:', response);
       
-      if (response.data && Array.isArray(response.data.customers)) {
-        customersData = response.data.customers;
-      } else if (response.data && Array.isArray(response.data)) {
-        customersData = response.data;
-      } else if (Array.isArray(response)) {
-        customersData = response;
+      if (response.success) {
+        let customersData = [];
+        
+        if (response.data && Array.isArray(response.data.customers)) {
+          customersData = response.data.customers;
+        } else if (response.data && Array.isArray(response.data)) {
+          customersData = response.data;
+        } else if (Array.isArray(response)) {
+          customersData = response;
+        } else {
+          customersData = [];
+        }
+        
+        setCustomers(customersData);
       } else {
-        customersData = [];
+        setError('Failed to load customers');
       }
-      
-      setCustomers(customersData);
-    } else {
-      setError('Failed to load customers');
+    } catch (err) {
+      setError('Error connecting to server');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    setError('Error connecting to server');
-    console.error(err);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   const handleCreateCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +140,7 @@ function CustomersContent() {
             country: 'Kenya'
           }
         });
-        fetchCustomers(); // Refresh the list
+        fetchCustomers();
       } else {
         toast.error(response.message || 'Failed to create customer');
       }
@@ -127,10 +151,115 @@ function CustomersContent() {
     }
   };
 
+  const handleEditClick = (customer: Customer) => {
+    setSelectedCustomer(customer);
+    setEditCustomer({
+      id: customer.id,
+      meter_number: customer.meter_number,
+      first_name: customer.first_name,
+      last_name: customer.last_name,
+      email: customer.email || '',
+      phone_number: customer.phone_number,
+      zone: customer.zone,
+      address: {
+        street_address: '', // You might want to fetch full customer details including address
+        city: '',
+        postal_code: '',
+        country: 'Kenya'
+      }
+    });
+    setShowEditModal(true);
+  };
+
+  const handleUpdateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCustomer) return;
+    
+    setSubmitting(true);
+    
+    try {
+      // Prepare update data (only send fields that changed)
+      const updateData: any = {};
+      
+      if (editCustomer.first_name !== selectedCustomer.first_name) {
+        updateData.first_name = editCustomer.first_name;
+      }
+      if (editCustomer.last_name !== selectedCustomer.last_name) {
+        updateData.last_name = editCustomer.last_name;
+      }
+      if (editCustomer.email !== selectedCustomer.email) {
+        updateData.email = editCustomer.email;
+      }
+      if (editCustomer.phone_number !== selectedCustomer.phone_number) {
+        updateData.phone_number = editCustomer.phone_number;
+      }
+      if (editCustomer.zone !== selectedCustomer.zone) {
+        updateData.zone = editCustomer.zone;
+      }
+      if (editCustomer.meter_number !== selectedCustomer.meter_number) {
+        updateData.meter_number = editCustomer.meter_number;
+      }
+      
+      // Only make API call if there are changes
+      if (Object.keys(updateData).length === 0) {
+        toast.info('No changes made');
+        setShowEditModal(false);
+        return;
+      }
+      
+      const response = await customerApi.update(selectedCustomer.meter_number, updateData);
+      
+      if (response.success) {
+        toast.success('Customer updated successfully');
+        setShowEditModal(false);
+        fetchCustomers();
+      } else {
+        toast.error(response.message || 'Failed to update customer');
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Failed to update customer');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteClick = (customer: Customer) => {
+  setSelectedCustomer(customer);
+  setShowDeleteModal(true);
+};
+
+const handleDeleteCustomer = async () => {
+  if (!selectedCustomer) return;
+  
+  setDeleting(true);
+  
+  try {
+    console.log('🗑️ Deleting customer:', selectedCustomer.meter_number);
+    
+    // PASS true as the second parameter to add ?confirm=true
+    const response = await customerApi.delete(selectedCustomer.meter_number, true);
+    
+    console.log('✅ Response:', response);
+    
+    if (response.success) {
+      toast.success('Customer deleted successfully');
+      setShowDeleteModal(false);
+      fetchCustomers();
+    } else {
+      toast.error(response.message || 'Failed to delete customer');
+    }
+  } catch (error: any) {
+    console.log('❌ Error:', error.response?.data || error);
+    toast.error(error.response?.data?.message || 'Failed to delete customer');
+  } finally {
+    setDeleting(false);
+  }
+};
+
   const filteredCustomers = customers.filter(c => 
-    c.meter_number.toLowerCase().includes(search.toLowerCase()) ||
-    c.first_name.toLowerCase().includes(search.toLowerCase()) ||
-    c.last_name.toLowerCase().includes(search.toLowerCase()) ||
+    c.meter_number?.toLowerCase().includes(search.toLowerCase()) ||
+    c.first_name?.toLowerCase().includes(search.toLowerCase()) ||
+    c.last_name?.toLowerCase().includes(search.toLowerCase()) ||
     c.email?.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -216,12 +345,20 @@ function CustomersContent() {
                       {c.status}
                     </span>
                   </td>
-                  <td className="px-6 py-4 text-sm">KSh {c.balance.toLocaleString()}</td>
+                  <td className="px-6 py-4 text-sm">KSh {c.balance?.toLocaleString() || '0'}</td>
                   <td className="px-6 py-4 text-right">
-                    <button className="text-blue-600 hover:text-blue-900 mr-3">
+                    <button 
+                      onClick={() => handleEditClick(c)}
+                      className="text-blue-600 hover:text-blue-900 mr-3 transition-colors"
+                      title="Edit customer"
+                    >
                       <Edit className="w-4 h-4" />
                     </button>
-                    <button className="text-red-600 hover:text-red-900">
+                    <button 
+                      onClick={() => handleDeleteClick(c)}
+                      className="text-red-600 hover:text-red-900 transition-colors"
+                      title="Delete customer"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </td>
@@ -238,7 +375,7 @@ function CustomersContent() {
         </div>
       </div>
 
-      {/* Add Customer Modal */}
+      {/* Add Customer Modal (existing) */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
@@ -332,11 +469,8 @@ function CustomersContent() {
                     className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="">Select Zone</option>
-                    <option value="North Zone">North Zone</option>
-                    <option value="South Zone">South Zone</option>
-                    <option value="East Zone">East Zone</option>
-                    <option value="West Zone">West Zone</option>
-                    <option value="Central Zone">Central Zone</option>
+                    <option value="Kagerema">Kagerema</option>
+                    <option value="Mwana Wikio">Mwana Wikio</option>
                   </select>
                 </div>
 
@@ -413,6 +547,183 @@ function CustomersContent() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Customer Modal */}
+      {showEditModal && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900">Edit Customer</h2>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleUpdateCustomer}>
+              <div className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      First Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editCustomer.first_name}
+                      onChange={(e) => setEditCustomer({...editCustomer, first_name: e.target.value})}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Last Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={editCustomer.last_name}
+                      onChange={(e) => setEditCustomer({...editCustomer, last_name: e.target.value})}
+                      className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Meter Number *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editCustomer.meter_number}
+                    onChange={(e) => setEditCustomer({...editCustomer, meter_number: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={editCustomer.email}
+                    onChange={(e) => setEditCustomer({...editCustomer, email: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Phone Number *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={editCustomer.phone_number}
+                    onChange={(e) => setEditCustomer({...editCustomer, phone_number: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Zone *
+                  </label>
+                  <select
+                    required
+                    value={editCustomer.zone}
+                    onChange={(e) => setEditCustomer({...editCustomer, zone: e.target.value})}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select Zone</option>
+                    <option value="North Zone">North Zone</option>
+                    <option value="South Zone">South Zone</option>
+                    <option value="East Zone">East Zone</option>
+                    <option value="West Zone">West Zone</option>
+                    <option value="Central Zone">Central Zone</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="p-6 border-t flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Updating...
+                    </>
+                  ) : (
+                    <>
+                      <Save size={18} />
+                      Update Customer
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && selectedCustomer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full">
+            <div className="p-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Customer</h3>
+              <p className="text-gray-600">
+                Are you sure you want to delete{' '}
+                <span className="font-medium">{selectedCustomer.first_name} {selectedCustomer.last_name}</span>?
+                <br />
+                <span className="text-sm text-red-600 mt-2 block">
+                  This action cannot be undone.
+                </span>
+              </p>
+            </div>
+            
+            <div className="px-6 py-4 bg-gray-50 rounded-b-lg flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteCustomer}
+                disabled={deleting}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {deleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={18} />
+                    Delete Customer
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

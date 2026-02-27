@@ -405,6 +405,35 @@ func (cs *CustomerService) GetCustomers(ctx context.Context, filter bson.M, page
 	return customers, total, nil
 }
 
+// DeleteCustomer removes a customer by meter number
+func (cs *CustomerService) DeleteCustomer(meterNumber string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// First, check if customer exists
+	customer, err := cs.GetCustomerByMeterNumber(meterNumber)
+	if err != nil {
+		return fmt.Errorf("error checking customer: %v", err)
+	}
+	if customer == nil {
+		return fmt.Errorf("customer with meter number %s not found", meterNumber)
+	}
+
+	// Optional: Check if customer has any unpaid bills before deleting
+	// You might want to prevent deletion if they have outstanding balance
+
+	result, err := cs.customersCollection.DeleteOne(ctx, bson.M{"meter_number": meterNumber})
+	if err != nil {
+		return fmt.Errorf("failed to delete customer: %v", err)
+	}
+
+	if result.DeletedCount == 0 {
+		return fmt.Errorf("customer with meter number %s not found", meterNumber)
+	}
+
+	return nil
+}
+
 // CustomerStatistics represents customer statistics
 type CustomerStatistics struct {
 	Total         int64            `json:"total"`

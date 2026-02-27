@@ -3,7 +3,10 @@ package services
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -11,8 +14,6 @@ import (
 	"waterbilling/backend/models"
 
 	"github.com/joho/godotenv"
-	"github.com/twilio/twilio-go"
-	twilioApi "github.com/twilio/twilio-go/rest/api/v2010"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -20,10 +21,12 @@ import (
 )
 
 type SMSService struct {
-	client    *twilio.RestClient
-	from      string
+	apiKey    string
+	username  string
+	senderID  string
 	db        *mongo.Database
 	isEnabled bool
+	provider  string
 }
 
 func NewSMSService(db *mongo.Database) (*SMSService, error) {
@@ -32,82 +35,130 @@ func NewSMSService(db *mongo.Database) (*SMSService, error) {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	accountSid := os.Getenv("TWILIO_ACCOUNT_SID")
-	authToken := os.Getenv("TWILIO_AUTH_TOKEN")
-	fromNumber := os.Getenv("TWILIO_PHONE_NUMBER")
+	// Get Africa's Talking credentials
+	apiKey := os.Getenv("AFRICASTALKING_API_KEY")
+	username := os.Getenv("AFRICASTALKING_USERNAME")
+	senderID := os.Getenv("AFRICASTALKING_SENDER_ID")
 
-	// If no Twilio credentials, check for Africa's Talking as alternative
-	africastalkingAPIKey := os.Getenv("AFRICASTALKING_API_KEY")
-	africastalkingUsername := os.Getenv("AFRICASTALKING_USERNAME")
-
-	var client *twilio.RestClient
-	var from string
-	var isEnabled bool
-
-	// Priority 1: Use Twilio if credentials are available
-	if accountSid != "" && authToken != "" && fromNumber != "" {
-		client = twilio.NewRestClientWithParams(twilio.ClientParams{
-			Username: accountSid,
-			Password: authToken,
-		})
-		from = fromNumber
-		isEnabled = true
-		log.Println("✅ SMS Service initialized with Twilio")
-	} else if africastalkingAPIKey != "" && africastalkingUsername != "" {
-		// Priority 2: Use Africa's Talking if configured
-		log.Println("⚠️ Africa's Talking detected but not implemented. Using mock SMS.")
-		isEnabled = false
-	} else {
-		// No SMS provider configured
-		log.Println("⚠️ No SMS provider configured. Using mock SMS service.")
-		isEnabled = false
+	// Check if credentials are available
+	if apiKey == "" || username == "" {
+		log.Println("⚠️ Africa's Talking credentials not found. Using mock SMS service.")
+		return &SMSService{
+			db:        db,
+			isEnabled: false,
+			provider:  "mock",
+		}, nil
 	}
 
+	log.Println("✅ SMS Service initialized with Africa's Talking (HTTP client)")
 	return &SMSService{
-		client:    client,
-		from:      from,
+		apiKey:    apiKey,
+		username:  username,
+		senderID:  senderID,
 		db:        db,
-		isEnabled: isEnabled,
+		isEnabled: true,
+		provider:  "africastalking",
 	}, nil
 }
 
-// SendSMS sends an SMS message using Twilio
+// SendSMS sends an SMS message
 func (s *SMSService) SendSMS(to, message string) error {
-	if !s.isEnabled || s.client == nil {
-		// Mock SMS for development
+	if !s.isEnabled {
 		log.Printf("[MOCK SMS] To: %s, Message: %s", to, message)
 		return nil
 	}
+	return s.sendAfricasTalkingSMS(to, message)
+}
 
-	params := &twilioApi.CreateMessageParams{}
-	params.SetTo(s.formatPhoneNumber(to))
-	params.SetFrom(s.from)
-	params.SetBody(message)
+// sendAfricasTalkingSMS sends SMS via Africa's Talking HTTP API
+func (s *SMSService) sendAfricasTalkingSMS(to, message string) error {
+	// Format phone number
+	phone := s.formatPhoneNumberForAT(to)
 
-	resp, err := s.client.Api.CreateMessage(params)
+	// Determine API environment
+	apiURL := "https://api.africastalking.com/version1/messaging"
+	if os.Getenv("APP_ENV") == "development" {
+		apiURL = "https://api.sandbox.africastalking.com/version1/messaging"
+	}
+
+	// Prepare form data (x-www-form-urlencoded)
+	formData := url.Values{}
+	formData.Set("username", s.username)
+	formData.Set("to", phone)
+	formData.Set("message", message)
+
+	// Add sender ID if available
+	if s.senderID != "" {
+		formData.Set("from", s.senderID)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", apiURL, strings.NewReader(formData.Encode()))
 	if err != nil {
-		log.Printf("Failed to send SMS: %v", err)
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	// Set correct headers for Africa's Talking
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("apiKey", s.apiKey)
+
+	// Send request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("❌ Africa's Talking SMS failed: %v", err)
 		return fmt.Errorf("failed to send SMS: %v", err)
 	}
+	defer resp.Body.Close()
 
-	if resp.Sid != nil {
-		log.Printf("SMS sent successfully. SID: %s", *resp.Sid)
-	} else {
-		log.Printf("SMS sent successfully.")
+	// Read response body for debugging
+	body, _ := io.ReadAll(resp.Body)
+
+	// Check response
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		log.Printf("❌ Africa's Talking error (%d): %s", resp.StatusCode, string(body))
+		return fmt.Errorf("SMS API returned status: %d", resp.StatusCode)
 	}
 
+	log.Printf("✅ Africa's Talking SMS sent to %s", phone)
+	log.Printf("📥 Response: %s", string(body))
 	return nil
+}
+
+// formatPhoneNumberForAT formats phone number for Africa's Talking (Kenya)
+func (s *SMSService) formatPhoneNumberForAT(phone string) string {
+	// Remove any non-digit characters
+	phone = strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, phone)
+
+	// Kenyan number formats: 0712345678 -> 254712345678
+	if strings.HasPrefix(phone, "0") && len(phone) == 10 {
+		phone = "254" + phone[1:]
+	}
+
+	// If starts with +254, remove the +
+	if strings.HasPrefix(phone, "+254") {
+		phone = phone[1:]
+	}
+
+	// Ensure we have the correct format (254XXXXXXXXX)
+	if !strings.HasPrefix(phone, "254") {
+		phone = "254" + phone
+	}
+
+	return phone
 }
 
 // SendBillNotification sends a bill notification SMS to customer
 func (s *SMSService) SendBillNotification(bill *models.Bill, customer *models.Customer) error {
 	message := s.generateBillMessage(bill, customer)
-
 	err := s.SendSMS(customer.PhoneNumber, message)
-
-	// Log the SMS attempt
 	s.logSMS(customer.ID, bill.ID, customer.PhoneNumber, message, err == nil, "bill_notification")
-
 	return err
 }
 
@@ -115,20 +166,21 @@ func (s *SMSService) SendBillNotification(bill *models.Bill, customer *models.Cu
 func (s *SMSService) SendPaymentConfirmation(payment *models.Payment, customer *models.Customer) error {
 	message := fmt.Sprintf(
 		"Dear %s,\n\n"+
-			"Payment Received: Ksh %.2f\n"+
+			"✅ Payment Received: KSh %.2f\n"+
 			"Receipt: %s\n"+
 			"Meter: %s\n"+
+			"Date: %s\n\n"+
 			"Thank you for your payment!\n"+
-			"Water Billing System",
+			"Rochi Pure Water",
 		customer.FirstName,
 		payment.Amount,
 		payment.ReceiptNumber,
 		payment.MeterNumber,
+		payment.PaymentDate.Format("02 Jan 2006"),
 	)
 
 	err := s.SendSMS(customer.PhoneNumber, message)
 	s.logSMS(customer.ID, payment.BillID, customer.PhoneNumber, message, err == nil, "payment_confirmation")
-
 	return err
 }
 
@@ -137,12 +189,12 @@ func (s *SMSService) SendDisconnectionWarning(bill *models.Bill, customer *model
 	dueDate := bill.DueDate.Format("02 Jan 2006")
 
 	message := fmt.Sprintf(
-		"URGENT: Dear %s,\n\n"+
-			"Your water account %s has overdue amount of Ksh %.2f\n"+
+		"⚠️ URGENT: Dear %s,\n\n"+
+			"Your water account %s has overdue amount of KSh %.2f\n"+
 			"Original Due Date: %s\n"+
-			"Pay within 48 hours to avoid disconnection.\n"+
+			"Pay within 48 hours to avoid disconnection.\n\n"+
 			"Contact: 0700 000 000\n"+
-			"Water Billing System",
+			"Rochi Pure Water",
 		customer.FirstName,
 		bill.MeterNumber,
 		bill.Balance,
@@ -151,26 +203,7 @@ func (s *SMSService) SendDisconnectionWarning(bill *models.Bill, customer *model
 
 	err := s.SendSMS(customer.PhoneNumber, message)
 	s.logSMS(customer.ID, bill.ID, customer.PhoneNumber, message, err == nil, "disconnection_warning")
-
 	return err
-}
-
-// BulkSendBillNotifications sends notifications for multiple bills
-func (s *SMSService) BulkSendBillNotifications(bills []models.Bill, customerMap map[primitive.ObjectID]models.Customer) map[string]error {
-	results := make(map[string]error)
-
-	for _, bill := range bills {
-		customer, exists := customerMap[bill.CustomerID]
-		if !exists {
-			results[bill.BillNumber] = fmt.Errorf("customer not found for bill %s", bill.BillNumber)
-			continue
-		}
-
-		err := s.SendBillNotification(&bill, &customer)
-		results[bill.BillNumber] = err
-	}
-
-	return results
 }
 
 // generateBillMessage creates the SMS message for a bill
@@ -179,27 +212,24 @@ func (s *SMSService) generateBillMessage(bill *models.Bill, customer *models.Cus
 
 	message := fmt.Sprintf(
 		"Dear %s,\n\n"+
-			"Water Bill: %s\n"+
-			"Account: %s\n"+
+			"Your water bill for %s is now ready.\n\n"+
 			"Meter: %s\n"+
-			"Previous Reading: %.2f\n"+
-			"Current Reading: %.2f\n"+
-			"Consumption: %.2f m³\n"+
-			"Amount Due: Ksh %.2f\n"+
+			"Previous Reading: %.1f units\n"+
+			"Current Reading: %.1f units\n"+
+			"Consumption: %.1f units\n"+
+			"Amount Due: KSh %.0f\n"+
 			"Due Date: %s\n\n"+
-			"Pay via M-Pesa: Paybill 123456 Account: %s\n"+
-			"Thank you!\n"+
-			"Water Billing System",
+			"Please make payment to avoid service interruption.\n\n"+
+			"Thank you,\n"+
+			"Rochi Pure Water",
 		customer.FirstName,
-		bill.BillNumber,
-		bill.AccountNumber,
+		bill.BillingPeriod,
 		bill.MeterNumber,
 		bill.PreviousReading,
 		bill.CurrentReading,
 		bill.Consumption,
 		bill.TotalAmount,
 		dueDate,
-		bill.MeterNumber,
 	)
 
 	return message
@@ -221,6 +251,7 @@ func (s *SMSService) logSMS(customerID, billID primitive.ObjectID, phone, messag
 		MessageType: messageType,
 		Status:      "sent",
 		SentAt:      time.Now(),
+		Provider:    s.provider,
 	}
 
 	if !success {
@@ -231,29 +262,6 @@ func (s *SMSService) logSMS(customerID, billID primitive.ObjectID, phone, messag
 	if err != nil {
 		log.Printf("Failed to log SMS: %v", err)
 	}
-}
-
-// formatPhoneNumber formats phone number for SMS
-func (s *SMSService) formatPhoneNumber(phone string) string {
-	// Remove any non-digit characters
-	phone = strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		return -1
-	}, phone)
-
-	// If starts with 0, replace with country code (assuming Kenya)
-	if strings.HasPrefix(phone, "0") {
-		phone = "254" + phone[1:]
-	}
-
-	// Add + prefix for international format
-	if !strings.HasPrefix(phone, "+") {
-		phone = "+" + phone
-	}
-
-	return phone
 }
 
 // GetSMSLogs retrieves SMS logs with optional filtering
@@ -285,15 +293,4 @@ func (s *SMSService) GetSMSLogs(filter bson.M, limit int64) ([]models.SMSLog, er
 // IsEnabled returns true if SMS service is enabled
 func (s *SMSService) IsEnabled() bool {
 	return s.isEnabled
-}
-
-// GetDeliveryStatus checks delivery status for a message
-func (s *SMSService) GetDeliveryStatus(messageID string) (string, error) {
-	if !s.isEnabled || s.client == nil {
-		return "mock_delivered", nil
-	}
-
-	// Twilio implementation would go here
-	// For now, return mock status
-	return "delivered", nil
 }
