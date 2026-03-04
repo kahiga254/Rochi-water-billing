@@ -5,12 +5,12 @@ import { useParams, useRouter } from 'next/navigation';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { billsApi } from '@/lib/api/bills';
 import { toast } from 'sonner';
-import { 
-  ArrowLeft, 
-  FileText, 
-  Calendar, 
-  User, 
-  Zap, 
+import {
+  ArrowLeft,
+  FileText,
+  Calendar,
+  User,
+  Zap,
   DollarSign,
   Clock,
   CheckCircle,
@@ -64,7 +64,7 @@ function BillDetailsContent() {
     try {
       setLoading(true);
       const response = await billsApi.getById(billId);
-      
+
       if (response.success) {
         setBill(response.data);
       } else {
@@ -80,7 +80,7 @@ function BillDetailsContent() {
 
   const handleSendReminder = async () => {
     if (!bill) return;
-    
+
     setSendingReminder(true);
     try {
       const response = await billsApi.sendNotification(bill.id);
